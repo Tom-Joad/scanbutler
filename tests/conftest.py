@@ -11,35 +11,69 @@ from stacksplit.config import Settings
 
 def make_pdf(path, pages: int) -> None:
     pdf = pikepdf.new()
-    for _ in range(pages):
+    for i in range(pages):
         pdf.add_blank_page(page_size=(595, 842))
+        # Lets the fake OCR know which stack page it is looking at, whatever
+        # chunk or call order the page arrives in.
+        pdf.pages[i].obj[pikepdf.Name("/TestIndex")] = i
     pdf.save(path)
 
 
 class FakeBackend:
     """Stands in for Mistral.
 
-    OCR hands out `texts` in page order (tests run with OCR_CONCURRENCY=1).
+    OCR returns `texts[i]` for stack page i, directly or through a fake batch
+    job. Batch requests whose custom_id is in `fail_batch` come back failed.
     A page whose text starts with "LETTER" is a new document; the title is
     the first line of a document's text.
     """
 
-    def __init__(self, texts: list[str]):
+    ocr_model = "fake-ocr"
+
+    def __init__(self, texts: list[str], fail_batch: set[str] | None = None):
         self.texts = texts
-        self.served = 0
+        self.fail_batch = fail_batch or set()
         self.ocr_calls = 0
+        self.jobs: dict[str, list] = {}
+        self.deleted: list[str] = []
         self.chat_calls: list[str] = []
 
     def ocr_pdf(self, pdf_bytes: bytes) -> list[dict]:
         self.ocr_calls += 1
+        return self._ocr(pdf_bytes)
+
+    def _ocr(self, pdf_bytes: bytes) -> list[dict]:
         with pikepdf.open(io.BytesIO(pdf_bytes)) as pdf:
-            count = len(pdf.pages)
-        pages = []
-        for i in range(count):
-            text = self.texts[self.served]
-            self.served += 1
-            pages.append({"index": i, "markdown": text, "header": "", "footer": "", "images": []})
-        return pages
+            indices = [int(page.obj["/TestIndex"]) for page in pdf.pages]
+        return [
+            {"index": i, "markdown": self.texts[n], "header": "", "footer": "", "images": []}
+            for i, n in enumerate(indices)
+        ]
+
+    def ocr_body(self, pdf_bytes: bytes) -> dict:
+        return {"pdf": pdf_bytes}
+
+    @staticmethod
+    def ocr_pages(result: dict) -> list[dict]:
+        return result["pages"]
+
+    def submit_batch(self, endpoint: str, model: str, lines: list) -> dict:
+        job = f"job-{len(self.jobs)}"
+        self.jobs[job] = lines
+        return {"job": job, "input_file": f"in-{job}"}
+
+    def wait_batch(self, job_id: str, poll_seconds: float, max_wait_seconds: float) -> dict:
+        return {"id": job_id, "status": "SUCCESS", "output_file": f"out-{job_id}", "error_file": None}
+
+    def batch_results(self, job: dict) -> dict:
+        return {
+            cid: {"pages": self._ocr(body["pdf"])}
+            for cid, body in self.jobs[job["id"]]
+            if cid not in self.fail_batch
+        }
+
+    def delete_files(self, file_ids: list) -> None:
+        self.deleted.extend(f for f in file_ids if f)
 
     def chat_json(self, system: str, user: str, schema: dict, name: str) -> dict:
         self.chat_calls.append(name)

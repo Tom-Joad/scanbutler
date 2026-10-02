@@ -19,7 +19,7 @@ from . import boundaries, metadata, pdfops
 from .config import Settings
 from .naming import build_stem, unique_path
 from .llm_cache import CachedChat
-from .ocr import Page, run_ocr
+from .ocr import BatchOptions, Page, run_ocr
 from .plan import Plan, PlannedDocument, format_pages, parse_pages
 
 log = logging.getLogger(__name__)
@@ -259,7 +259,12 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend)
     source = (folder / src.name).as_posix()
     log.info("stack started", extra={"source": source, "work_dir": str(work)})
 
-    pages = run_ocr(src, work / "ocr", backend, settings.ocr_chunk_pages, settings.ocr_concurrency)
+    batch = (
+        BatchOptions(settings.batch_poll_seconds, settings.batch_max_wait_hours * 3600)
+        if settings.ocr_mode == "batch"
+        else None
+    )
+    pages = run_ocr(src, work / "ocr", backend, settings.ocr_chunk_pages, settings.ocr_concurrency, batch)
 
     ink_path = work / INK
     if ink_path.exists():

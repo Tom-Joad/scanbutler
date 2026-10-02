@@ -73,6 +73,9 @@ class Settings:
     stable_seconds: int
 
     ocr_chunk_pages: int
+    ocr_mode: str
+    batch_poll_seconds: int
+    batch_max_wait_hours: float
     ocr_concurrency: int
     llm_concurrency: int
 
@@ -110,6 +113,10 @@ class Settings:
         if "{title}" not in pattern:
             raise ConfigError("FILENAME_PATTERN must contain {title}")
 
+        ocr_mode = _str("OCR_MODE", "batch").lower()
+        if ocr_mode not in {"batch", "direct"}:
+            raise ConfigError(f"OCR_MODE must be batch or direct, got {ocr_mode!r}")
+
         data = Path(_str("DATA_DIR", "/data"))
         return cls(
             api_key=api_key,
@@ -126,6 +133,9 @@ class Settings:
             poll_interval=_int("POLL_INTERVAL", 30, minimum=1),
             stable_seconds=_int("STABLE_SECONDS", 60, minimum=0),
             ocr_chunk_pages=_int("OCR_CHUNK_PAGES", 50, minimum=1),
+            ocr_mode=ocr_mode,
+            batch_poll_seconds=_int("BATCH_POLL_SECONDS", 15, minimum=1),
+            batch_max_wait_hours=_float("BATCH_MAX_WAIT_HOURS", 24.0),
             ocr_concurrency=_int("OCR_CONCURRENCY", 3, minimum=1),
             llm_concurrency=_int("LLM_CONCURRENCY", 4, minimum=1),
             boundary_window=window,

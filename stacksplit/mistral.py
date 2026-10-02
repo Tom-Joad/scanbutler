@@ -83,11 +83,11 @@ class MistralClient:
             self._cooldown_until = max(self._cooldown_until, time.monotonic() + delay)
         log.warning("api retry", extra={"path": path, "reason": reason, "attempt": attempt, "delay_s": round(delay, 1)})
 
-    def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         for attempt in range(1, self.max_attempts + 1):
             self._wait_for_cooldown()
             try:
-                response = self._http.post(path, json=body)
+                response = self._http.request(method, path, **kwargs)
             except httpx.TransportError as exc:
                 if attempt == self.max_attempts:
                     raise MistralError(f"{path}: transport error: {exc}") from exc
@@ -95,7 +95,7 @@ class MistralClient:
                 continue
 
             if response.status_code < 400:
-                return response.json()
+                return response
 
             if response.status_code in _RETRY_STATUS and attempt < self.max_attempts:
                 self._back_off(attempt, response.headers.get("retry-after"), path, response.status_code)
@@ -107,25 +107,102 @@ class MistralClient:
 
         raise MistralError(f"{path}: giving up after {self.max_attempts} attempts")
 
-    def ocr_pdf(self, pdf_bytes: bytes) -> list[dict[str, Any]]:
-        """OCR one PDF and return its page objects in page order."""
-        data_url = "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("ascii")
-        result = self._post(
-            "/ocr",
-            {
-                "model": self.ocr_model,
-                "document": {"type": "document_url", "document_url": data_url},
-                # Running headers and footers carry the strongest split hints
-                # (letterhead, "page 2 of 3"), so keep them as separate fields.
-                "extract_header": True,
-                "extract_footer": True,
-                "include_image_base64": False,
+    def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", path, json=body).json()
+
+    # --- OCR ------------------------------------------------------------------
+
+    def ocr_body(self, pdf_bytes: bytes) -> dict[str, Any]:
+        """Request body for /v1/ocr, shared by direct and batch calls."""
+        return {
+            "document": {
+                "type": "document_url",
+                "document_url": "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("ascii"),
             },
-        )
+            # Running headers and footers carry the strongest split hints
+            # (letterhead, "page 2 of 3"), so keep them as separate fields.
+            "extract_header": True,
+            "extract_footer": True,
+            "include_image_base64": False,
+        }
+
+    @staticmethod
+    def ocr_pages(result: dict[str, Any]) -> list[dict[str, Any]]:
         pages = result.get("pages")
         if not isinstance(pages, list):
             raise MistralError("/ocr: response has no pages list")
         return sorted(pages, key=lambda p: p.get("index", 0))
+
+    def ocr_pdf(self, pdf_bytes: bytes) -> list[dict[str, Any]]:
+        """OCR one PDF right away (full price) and return its pages in order."""
+        return self.ocr_pages(self._post("/ocr", {"model": self.ocr_model, **self.ocr_body(pdf_bytes)}))
+
+    # --- Batch API (half price, minutes instead of seconds) --------------------
+
+    def submit_batch(self, endpoint: str, model: str, lines: list[tuple[str, dict[str, Any]]]) -> dict[str, str]:
+        """Upload requests as JSONL and start a batch job. Returns the ids to persist."""
+        payload = "".join(json.dumps({"custom_id": cid, "body": body}) + "\n" for cid, body in lines).encode("utf-8")
+        uploaded = self._request(
+            "POST",
+            "/files",
+            files={"file": ("requests.jsonl", payload, "application/jsonl")},
+            data={"purpose": "batch"},
+        ).json()
+        try:
+            job = self._post(
+                "/batch/jobs",
+                {"input_files": [uploaded["id"]], "model": model, "endpoint": endpoint, "metadata": {"tool": "scan-stack-splitter"}},
+            )
+        except Exception:
+            self.delete_files([uploaded["id"]])
+            raise
+        log.info("batch submitted", extra={"job": job["id"], "requests": len(lines), "upload_mb": round(len(payload) / 2**20, 1)})
+        return {"job": job["id"], "input_file": uploaded["id"]}
+
+    def wait_batch(self, job_id: str, poll_seconds: float, max_wait_seconds: float) -> dict[str, Any]:
+        """Poll until the job leaves QUEUED/RUNNING; cancel it after max_wait_seconds."""
+        deadline = time.monotonic() + max_wait_seconds
+        last_logged = None
+        while True:
+            job = self._request("GET", f"/batch/jobs/{job_id}").json()
+            status = job.get("status")
+            if status not in ("QUEUED", "RUNNING", "CANCELLATION_REQUESTED"):
+                log.info(
+                    "batch finished",
+                    extra={"job": job_id, "status": status, "succeeded": job.get("succeeded_requests"), "failed": job.get("failed_requests")},
+                )
+                return job
+            if time.monotonic() > deadline and status != "CANCELLATION_REQUESTED":
+                log.warning("batch took too long, cancelling", extra={"job": job_id})
+                self._request("POST", f"/batch/jobs/{job_id}/cancel")
+            progress = (status, job.get("completed_requests"))
+            if progress != last_logged:
+                log.info("batch waiting", extra={"job": job_id, "status": status, "completed": job.get("completed_requests"), "total": job.get("total_requests")})
+                last_logged = progress
+            time.sleep(poll_seconds)
+
+    def batch_results(self, job: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """custom_id -> response body, for every request that succeeded."""
+        results: dict[str, dict[str, Any]] = {}
+        if not job.get("output_file"):
+            return results
+        content = self._request("GET", f"/files/{job['output_file']}/content").content.decode("utf-8")
+        for line in content.splitlines():
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            response = record.get("response") or {}
+            if response.get("status_code") == 200 and isinstance(response.get("body"), dict):
+                results[record["custom_id"]] = response["body"]
+        return results
+
+    def delete_files(self, file_ids: list[str | None]) -> None:
+        """Remove uploads and results from Mistral's storage; best effort."""
+        for file_id in filter(None, file_ids):
+            try:
+                self._request("DELETE", f"/files/{file_id}")
+            except MistralError as exc:
+                log.warning("could not delete file at Mistral", extra={"file": file_id, "error": str(exc)[:200]})
 
     def chat_json(self, system: str, user: str, schema: dict[str, Any], name: str) -> dict[str, Any]:
         """Run a chat completion constrained to a JSON schema and parse the result."""

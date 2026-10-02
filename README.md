@@ -19,8 +19,13 @@ layer comes from a fresh Tesseract pass via [ocrmypdf](https://ocrmypdf.readthed
 
 ## How it works
 
-1. **OCR**: The stack is sent to Mistral OCR in chunks of 50 pages. Each chunk's
-   result is cached, so an interrupted run never pays for the same page twice.
+1. **OCR**: The stack is sent to Mistral OCR in chunks of 50 pages through the
+   [batch API](https://docs.mistral.ai/capabilities/batch/). That costs half
+   the regular price, and a job takes minutes instead of seconds. Job ids and
+   each chunk's result are stored as soon as they exist, so an interrupted run
+   never pays for the same page twice. Uploads and results are deleted from
+   Mistral's file storage afterwards. A chunk that fails in the batch is
+   retried directly. `OCR_MODE=direct` skips the batch API.
 2. **Blank pages**: Pages are dropped when their image shows almost no ink,
    typically duplex back sides. The measurement is on the scan itself, not on
    the OCR text: OCR models occasionally hallucinate whole paragraphs on an
@@ -95,6 +100,7 @@ The ones you are most likely to change:
 | `MISTRAL_API_KEY` | — | Required |
 | `MISTRAL_LLM_MODEL` | `mistral-large-latest` | Model for splitting and naming |
 | `MISTRAL_MAX_RPS` | `1` | Requests per second; set to your account's limit |
+| `OCR_MODE` | `batch` | `batch` (half price) or `direct` (immediate) |
 | `TITLE_LANGUAGE` | language of the document | e.g. `German` |
 | `FILENAME_PATTERN` | `{title} {date}` | `{date}` is `YYYY-MM-DD` |
 | `NO_DATE_LABEL` | `undated` | Used when no date is found |
