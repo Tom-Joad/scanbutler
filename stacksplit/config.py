@@ -152,14 +152,19 @@ class Settings:
             raise ConfigError(f"OCR_MODE must be batch or direct, got {ocr_mode!r}")
 
         data = Path(_str("DATA_DIR", "/data"))
+        # Splitting profits from Mistral OCR's structure; naming a single
+        # scanner file showed no measurable difference (README > Choosing the
+        # text source), so scanner files skip the paid OCR by default. Without
+        # ocrmypdf there is no Tesseract layer to read, so fall back to Mistral.
+        scanner_default = "tesseract" if _bool("OCRMYPDF_ENABLED", True) else "mistral"
         profiles = [
             Profile(
                 name,
                 Path(_str(f"{name.upper()}_DIR", str(data / name))),
                 split,
-                _str(f"{name.upper()}_TEXT_SOURCE", "mistral").lower(),
+                _str(f"{name.upper()}_TEXT_SOURCE", default_source).lower(),
             )
-            for name, split in (("stacks", True), ("scanner", False))
+            for name, split, default_source in (("stacks", True, "mistral"), ("scanner", False, scanner_default))
             if _bool(f"{name.upper()}_ENABLED", True)
         ]
         for profile in profiles:

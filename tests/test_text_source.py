@@ -61,6 +61,19 @@ def test_tesseract_source_splits_and_names_without_mistral_ocr(settings, tmp_pat
     assert [d["pages"] for d in plan["documents"]] == ["1-2", "3"]
 
 
+def test_default_text_sources(monkeypatch):
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    for name in ("STACKS_TEXT_SOURCE", "SCANNER_TEXT_SOURCE", "OCRMYPDF_ENABLED"):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings.from_env()
+    assert settings.profile("stacks").text_source == "mistral"
+    assert settings.profile("scanner").text_source == "tesseract"
+
+    # Without ocrmypdf there is no Tesseract layer: the scanner falls back.
+    monkeypatch.setenv("OCRMYPDF_ENABLED", "false")
+    assert Settings.from_env().profile("scanner").text_source == "mistral"
+
+
 def test_text_source_settings_are_validated(monkeypatch):
     monkeypatch.setenv("MISTRAL_API_KEY", "x")
     monkeypatch.setenv("SCANNER_TEXT_SOURCE", "Tesseract")

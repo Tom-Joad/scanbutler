@@ -34,11 +34,13 @@ Titles are written in the language of each document unless you set
 
 Under the hood:
 
-- [Mistral OCR](https://docs.mistral.ai/capabilities/document_ai/basic_ocr/)
-  reads the pages through Mistral's batch API, at half the regular price.
-- A Mistral chat model decides where documents begin and names them.
 - [ocrmypdf](https://ocrmypdf.readthedocs.io/) with Tesseract adds a fresh,
   invisible text layer, so every output PDF is searchable.
+- [Mistral OCR](https://docs.mistral.ai/capabilities/document_ai/basic_ocr/)
+  reads stacks through Mistral's batch API, at half the regular price. Its
+  structured text makes splitting more reliable. Scanner files are read from
+  the Tesseract layer instead, which costs nothing and adds no waiting time.
+- A Mistral chat model decides where documents begin and names them.
 
 ## Contents
 
@@ -90,7 +92,8 @@ docker compose run --rm scan-stack-splitter process /data/some.pdf --profile sta
 
 ## How it works
 
-1. **OCR.** Pages go to Mistral OCR in chunks of 50 through the
+1. **OCR** (stacks by default). Pages go to Mistral OCR in chunks of 50
+   through the
    [batch API](https://docs.mistral.ai/capabilities/batch/). A job takes
    minutes instead of seconds and costs half as much. Job ids and results are
    stored as soon as they exist, so an interrupted run never pays for a page
@@ -98,11 +101,9 @@ docker compose run --rm scan-stack-splitter process /data/some.pdf --profile sta
    afterwards. A chunk that fails inside a batch is retried directly.
    `OCR_MODE=direct` skips the batch API.
 
-   Alternatively, an input can read its text from the Tesseract layer that
-   step 5 adds anyway (`STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` set to
-   `tesseract`). That is free and adds no waiting time. The trade-off: plain
-   text instead of structured tables, no separate running headers and footers,
-   and weaker recognition on poor scans. See
+   Scanner files skip this step by default. Their text comes from the
+   Tesseract layer that step 5 adds anyway. Either input can be switched with
+   `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE`; see
    [Choosing the text source](#choosing-the-text-source).
 2. **Blank pages.** A page is dropped when its image shows almost no ink,
    typically the back of a duplex scan. The check uses the image itself, not
@@ -185,7 +186,7 @@ them with comments.
 | `DATA_DIR` | `/data` | Parent of the default folders below |
 | `STACKS_DIR` / `SCANNER_DIR` | `$DATA_DIR/stacks`, `$DATA_DIR/scanner` | Root of each input; `inbox/`, `output/`, `archive/` and `failed/` live below it |
 | `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
-| `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` | `mistral` | Text for splitting and naming: `mistral` (Mistral OCR) or `tesseract` (free, from the text layer) |
+| `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` | `mistral` / `tesseract` | Text for splitting and naming: `mistral` (Mistral OCR) or `tesseract` (free, from the text layer). The scanner falls back to `mistral` when `OCRMYPDF_ENABLED=false` |
 | `WORK_DIR` | `$DATA_DIR/work` | OCR results, plans and review files |
 | `TMPDIR` | `/tmp` | Temporary page images; point it at a disk for large stacks |
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
@@ -319,7 +320,8 @@ While paused:
 
 Splitting and naming read the text of each page. Per input, it can come from
 Mistral OCR (`mistral`) or from the Tesseract text layer (`tesseract`). The
-Tesseract layer is added to every output PDF either way.
+Tesseract layer is added to every output PDF either way. By default, stacks
+use `mistral` and scanner files use `tesseract`.
 
 | | `mistral` | `tesseract` |
 |---|---|---|
@@ -343,8 +345,9 @@ The remaining misses of both runs were debatable cases. One example is two
 X-ray views of the same examination that had been filed as two documents.
 
 In short: Mistral OCR splits somewhat better. For naming alone, as with
-scanner files, the difference was not measurable. `tesseract` is therefore a
-reasonable choice for `SCANNER_TEXT_SOURCE` if waiting time or cost matters.
+scanner files, the difference was not measurable. That is why the defaults
+are what they are. If your scanner files are handwritten or of poor quality,
+`SCANNER_TEXT_SOURCE=mistral` may be worth the cost.
 
 ## Rate limits and cost
 
@@ -357,7 +360,8 @@ request still runs into the limit, all workers pause together and retry.
 Splitting needs one request per 6 pages, and naming one request per document.
 A 500-page stack holding about 200 documents takes roughly 280 requests,
 which is about 20 minutes at 0.25 requests per second. A scanner file needs
-a single request. Every answer is cached in the work directory.
+a single request and, with the default text source, no OCR. Every answer is
+cached in the work directory.
 
 At the prices published in October 2026, a 500-page stack costs about
 US$1.60: about $1.00 for batch OCR and about $0.60 for the chat model.

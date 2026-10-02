@@ -61,6 +61,9 @@ token that has the `read:packages` scope.
 - Each file becomes one document in `scanner/output/`, named by its content.
   It is never split, but blank pages are dropped. The original moves to
   `scanner/archive/`.
+- By default, scanner files are named from the Tesseract text layer, without
+  Mistral OCR. That takes no batch wait and costs nothing. For handwriting or
+  poor scans, set `SCANNER_TEXT_SOURCE=mistral`.
 - The SMB user the scanner logs in with needs write access to
   `scanner/inbox/`. The container reads and moves the files as
   `nobody:users`.
