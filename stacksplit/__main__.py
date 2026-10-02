@@ -12,7 +12,7 @@ from . import logging_setup
 from .config import ConfigError, Settings
 from .mistral import MistralClient
 from .pipeline import process_stack, rebuild
-from .watcher import InboxWatcher
+from .watcher import run_all
 
 log = logging.getLogger("stacksplit")
 
@@ -31,10 +31,11 @@ def _client(settings: Settings) -> MistralClient:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="stacksplit", description="Split scanned PDF stacks into named, searchable documents.")
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("run", help="watch the inbox and process new stacks (default)")
+    sub.add_parser("run", help="watch the inboxes of all enabled profiles (default)")
     one = sub.add_parser("process", help="process a single PDF without moving it")
     one.add_argument("pdf", type=Path)
     one.add_argument("--folder", default="", help="output sub-folder (default: none)")
+    one.add_argument("--profile", default="stacks", choices=["stacks", "scanner"], help="stacks: split; scanner: one document per file")
     again = sub.add_parser("rebuild", help="re-cut a stack from its edited plan.json")
     again.add_argument("work_dir", help="the stack's work directory, absolute or relative to WORK_DIR")
     args = parser.parse_args(argv)
@@ -66,9 +67,11 @@ def main(argv: list[str] | None = None) -> int:
     client = _client(settings)
     try:
         if command == "process":
-            process_stack(args.pdf, PurePosixPath(args.folder), settings, client)
+            profile = settings.profile(args.profile)
+            profile.output.mkdir(parents=True, exist_ok=True)
+            process_stack(args.pdf, PurePosixPath(args.folder), settings, client, profile)
         else:
-            InboxWatcher(settings, client).run()
+            run_all(settings, client)
     finally:
         client.close()
     return 0

@@ -10,16 +10,19 @@
   <Project>https://github.com/Tom-Joad/scan-stack-splitter</Project>
   <Overview>
     Splits scanned PDF stacks (hundreds of pages, no separator sheets) into individual documents
-    by content, names each one by topic and date, and writes searchable PDFs. Drop a PDF into
-    inbox/ (sub-folders are mirrored) and find the documents in output/. Uses Mistral OCR via the
-    batch API and a Mistral chat model; the text layer comes from a fresh Tesseract pass. No web UI:
+    by content, names each one by topic and date, and writes searchable PDFs. A second input takes
+    files from a document scanner (one document per file, no splitting) and gives them the same
+    OCR and naming. Each input has its own inbox/ and output/ (sub-folders are mirrored). Uses
+    Mistral OCR via the batch API and a Mistral chat model; the text layer comes from a fresh
+    Tesseract pass. No web UI:
     progress is in the container log, a review.md per stack lists uncertain splits in the work
     folder. Needs a Mistral API key. If the image is private, Unraid needs a one-time
     `docker login ghcr.io` before the first pull.
   </Overview>
   <Category>Productivity: Tools:</Category>
   <ExtraParams>--init --user 99:100 --security-opt no-new-privileges</ExtraParams>
-  <Config Name="Documents" Target="/data" Default="/mnt/user/Documents/scan-stack-splitter" Mode="rw" Description="inbox/, output/, archive/ and failed/ are created here. Put this on a share you can reach over SMB." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Stacks" Target="/data/stacks" Default="/mnt/user/Documents/scan-stack-splitter/stacks" Mode="rw" Description="Large scans to split. inbox/, output/, archive/ and failed/ are created here." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Scanner" Target="/data/scanner" Default="/mnt/user/Documents/scan-stack-splitter/scanner" Mode="rw" Description="Scanner input, one document per file. Point the scanner's network-folder target at inbox/ below this path." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="Work" Target="/work" Default="/mnt/user/appdata/scan-stack-splitter" Mode="rw" Description="Per-stack OCR text, plan.json, review.md and temporary page images (several GB while a large stack is processed). Holds full document text: delete stacks you no longer need." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="MISTRAL_API_KEY" Target="MISTRAL_API_KEY" Default="" Mode="" Description="Mistral API key" Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="MISTRAL_LLM_MODEL" Target="MISTRAL_LLM_MODEL" Default="mistral-large-latest" Mode="" Description="Model for splitting and naming" Type="Variable" Display="always" Required="false" Mask="false"/>

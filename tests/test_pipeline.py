@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import PurePosixPath
 
 import pikepdf
@@ -26,13 +27,14 @@ def titles(paths):
 
 
 def test_process_splits_names_and_drops_blanks(settings, tmp_path):
+    stacks = settings.profile("stacks")
     src = tmp_path / "stack.pdf"
     make_pdf(src, len(STACK))
     backend = FakeBackend(STACK)
 
-    work = process_stack(src, PurePosixPath("Patient A"), settings, backend)
+    work = process_stack(src, PurePosixPath("Patient A"), settings, backend, stacks)
 
-    out = settings.output_dir / "Patient A"
+    out = stacks.output / "Patient A"
     assert titles(out.iterdir()) == [
         "Befundbericht CT undated.pdf",
         "Blutbild 2026-09-30.pdf",
@@ -50,24 +52,44 @@ def test_process_splits_names_and_drops_blanks(settings, tmp_path):
     assert "1 flagged" in (work / REVIEW).read_text(encoding="utf-8")
 
 
+def test_scanner_profile_keeps_one_document_per_file(settings, tmp_path):
+    scanner = settings.profile("scanner")
+    src = tmp_path / "scan.pdf"
+    make_pdf(src, len(STACK))
+    backend = FakeBackend(STACK)
+
+    work = process_stack(src, PurePosixPath(""), settings, backend, scanner)
+
+    # No splitting: one file holding every non-blank page, named after the first.
+    assert titles(scanner.output.iterdir()) == ["Blutbild 2026-09-30.pdf"]
+    with pikepdf.open(scanner.output / "Blutbild 2026-09-30.pdf") as pdf:
+        assert len(pdf.pages) == 5
+    assert "page_boundaries" not in backend.chat_calls
+    assert json.loads((work / PLAN).read_text(encoding="utf-8"))["profile"] == "scanner"
+    assert work.relative_to(settings.work_dir).parts[0] == "scanner"
+    assert not any(settings.profile("stacks").output.glob("*.pdf"))
+
+
 def test_rerun_uses_caches_and_replaces_outputs(settings, tmp_path):
+    stacks = settings.profile("stacks")
     src = tmp_path / "stack.pdf"
     make_pdf(src, len(STACK))
     backend = FakeBackend(STACK)
-    process_stack(src, PurePosixPath(""), settings, backend)
-    calls = (backend.ocr_calls, len(backend.chat_calls))
+    process_stack(src, PurePosixPath(""), settings, backend, stacks)
+    calls = (len(backend.jobs), backend.ocr_calls, len(backend.chat_calls))
 
-    process_stack(src, PurePosixPath(""), settings, backend)
+    process_stack(src, PurePosixPath(""), settings, backend, stacks)
 
-    assert (backend.ocr_calls, len(backend.chat_calls)) == calls
-    assert len(list(settings.output_dir.glob("*.pdf"))) == 3
+    assert (len(backend.jobs), backend.ocr_calls, len(backend.chat_calls)) == calls
+    assert len(list(stacks.output.glob("*.pdf"))) == 3
 
 
 def test_rebuild_from_edited_plan_retitles_cleared_entries(settings, tmp_path):
+    stacks = settings.profile("stacks")
     src = tmp_path / "stack.pdf"
     make_pdf(src, len(STACK))
     backend = FakeBackend(STACK)
-    work = process_stack(src, PurePosixPath(""), settings, backend)
+    work = process_stack(src, PurePosixPath(""), settings, backend, stacks)
 
     plan = json.loads((work / PLAN).read_text(encoding="utf-8"))
     # Merge the CT report and the invoice, and have the result re-titled.
@@ -79,23 +101,28 @@ def test_rebuild_from_edited_plan_retitles_cleared_entries(settings, tmp_path):
     written = rebuild(work, settings, backend)
 
     assert titles(written) == ["Befundbericht CT undated.pdf", "Blutbild 2026-09-30.pdf"]
-    assert titles(settings.output_dir.glob("*.pdf")) == titles(written)
-    with pikepdf.open(settings.output_dir / "Befundbericht CT undated.pdf") as pdf:
+    assert titles(stacks.output.glob("*.pdf")) == titles(written)
+    with pikepdf.open(stacks.output / "Befundbericht CT undated.pdf") as pdf:
         assert len(pdf.pages) == 3
 
 
 def test_watcher_archives_success_and_quarantines_failure(settings):
-    folder = settings.inbox_dir / "Patient A"
+    stacks = settings.profile("stacks")
+    folder = stacks.inbox / "Patient A"
     folder.mkdir(parents=True)
     make_pdf(folder / "good.pdf", len(STACK))
     (folder / "broken.pdf").write_bytes(b"not a pdf")
 
-    watcher = InboxWatcher(settings, FakeBackend(STACK))
-    for path in watcher._candidates():
-        assert watcher._ready(path, 0.0)
-        watcher.process(path)
+    watcher = InboxWatcher(settings, stacks, FakeBackend(STACK), threading.Event())
+    watcher.poll_once()
 
-    assert (settings.archive_dir / "Patient A" / "good.pdf").exists()
-    assert (settings.failed_dir / "Patient A" / "broken.pdf").exists()
-    assert (settings.failed_dir / "Patient A" / "broken.pdf.error.txt").exists()
+    assert (stacks.archive / "Patient A" / "good.pdf").exists()
+    assert (stacks.failed / "Patient A" / "broken.pdf").exists()
+    assert (stacks.failed / "Patient A" / "broken.pdf.error.txt").exists()
     assert not any(folder.iterdir())
+
+
+def test_profiles_have_separate_folders(settings):
+    stacks, scanner = settings.profile("stacks"), settings.profile("scanner")
+    assert stacks.split and not scanner.split
+    assert {stacks.inbox, stacks.output}.isdisjoint({scanner.inbox, scanner.output})

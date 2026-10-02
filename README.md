@@ -4,13 +4,28 @@ Drop a scanned stack of paper — hundreds of pages, no separator sheets — int
 folder and get back one searchable PDF per document, named after its content:
 
 ```
-inbox/Patient A/stack-01.pdf  (500 pages)
+stacks/inbox/Patient A/stack-01.pdf  (500 pages)
         ↓
-output/Patient A/Blutbild 2026-09-30.pdf
-output/Patient A/Befundbericht CT Thorax 2026-09-30.pdf
-output/Patient A/Arztbrief Kardiologie 2026-08-14.pdf
+stacks/output/Patient A/Blutbild 2026-09-30.pdf
+stacks/output/Patient A/Befundbericht CT Thorax 2026-09-30.pdf
+stacks/output/Patient A/Arztbrief Kardiologie 2026-08-14.pdf
 ...
 ```
+
+A second input, `scanner/`, is meant for a document scanner that saves
+straight to a network share. There, each file is one document. It gets the
+same fresh OCR and content-based name, but is never split:
+
+```
+scanner/inbox/20261002_141503.pdf
+        ↓
+scanner/output/Rechnung Stadtwerke 2026-09-28.pdf
+```
+
+Both inputs have their own `inbox/`, `output/`, `archive/` and `failed/`
+folders and their own worker. A scan is processed right away, even while a
+large stack is still running. Either input can be switched off
+(`STACKS_ENABLED`, `SCANNER_ENABLED`).
 
 Document boundaries are found from the content alone. It uses
 [Mistral OCR](https://docs.mistral.ai/capabilities/document_ai/basic_ocr/) for
@@ -30,7 +45,7 @@ layer comes from a fresh Tesseract pass via [ocrmypdf](https://ocrmypdf.readthed
    typically duplex back sides. The measurement is on the scan itself, not on
    the OCR text: OCR models occasionally hallucinate whole paragraphs on an
    empty page.
-3. **Boundaries**: A chat model reads overlapping windows of 12 pages. It decides
+3. **Boundaries** (stacks only): A chat model reads overlapping windows of 12 pages. It decides
    for each page whether that page starts a new document, using letterheads,
    salutations, headings, dates, layout changes and text that continues across
    pages. Each page's verdict comes from the window where it had the most
@@ -46,7 +61,7 @@ layer comes from a fresh Tesseract pass via [ocrmypdf](https://ocrmypdf.readthed
    German and English. This is slower than the defaults but holds up much better
    on poor scans.
 6. **Output**: The pages of each document are cut from the searchable stack into
-   `OUTPUT_DIR/<inbox sub-folder>/<title> <date>.pdf`. The PDF title and subject
+   `<input>/output/<inbox sub-folder>/<title> <date>.pdf`. The PDF title and subject
    metadata are set too.
 
 The original stack is then moved to `archive/`. A stack that fails is moved to
@@ -56,7 +71,7 @@ cached OCR is reused.
 ## Reviewing and correcting splits
 
 Without separator sheets, splitting cannot be perfect. Every stack gets a work
-directory, `work/<sub-folder>/<stack name>-<hash>/`, containing:
+directory, `work/<input>/<sub-folder>/<stack name>-<hash>/`, containing:
 
 - `review.md`: every document with its page range and confidence. Documents
   are flagged ⚠ when they start in the middle ("page 3 of 5"), consist of a
@@ -69,7 +84,7 @@ To fix a split, edit `plan.json`. Change `pages`, merge entries or split them.
 Set `title` to `""` to have the title and date generated again. Then run:
 
 ```bash
-docker compose exec scan-stack-splitter stacksplit rebuild "Patient A/stack-01-1a2b3c4d"
+docker compose exec scan-stack-splitter stacksplit rebuild "stacks/Patient A/stack-01-1a2b3c4d"
 ```
 
 The files listed in `written_files` are replaced. Nothing is OCR'd again.
@@ -82,7 +97,8 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Then put PDFs into `DATA_PATH/inbox/`, optionally in sub-folders. A file is
+Then put PDFs into `DATA_PATH/stacks/inbox/` or `DATA_PATH/scanner/inbox/`,
+optionally in sub-folders. A file is
 picked up once it has not changed for `STABLE_SECONDS`, so copying a large
 scan over the network is safe.
 
@@ -91,7 +107,7 @@ On Unraid, use the template in [`unraid/`](unraid/README-UNRAID.md) instead.
 One-off processing without the watcher:
 
 ```bash
-docker compose run --rm scan-stack-splitter process /data/some.pdf --folder "Patient A"
+docker compose run --rm scan-stack-splitter process /data/some.pdf --folder "Patient A" --profile stacks
 ```
 
 All settings are environment variables. See [`.env.example`](.env.example).
@@ -103,6 +119,8 @@ The ones you are most likely to change:
 | `MISTRAL_LLM_MODEL` | `mistral-large-latest` | Model for splitting and naming |
 | `MISTRAL_MAX_RPS` | `1` | Requests per second; set to your account's limit |
 | `OCR_MODE` | `batch` | `batch` (half price) or `direct` (immediate) |
+| `STACKS_DIR` / `SCANNER_DIR` | `/data/stacks`, `/data/scanner` | Root of each input |
+| `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
 | `TITLE_LANGUAGE` | language of the document | e.g. `German` |
 | `FILENAME_PATTERN` | `{title} {date}` | `{date}` is `YYYY-MM-DD` |
 | `NO_DATE_LABEL` | `undated` | Used when no date is found |

@@ -18,7 +18,8 @@ Everything it does is visible in the container log.
 
    | Setting | Value |
    |---|---|
-   | Documents | A folder on a share you can reach over SMB, e.g. `/mnt/user/<share>/Scan-Splitter` |
+   | Stacks | e.g. `/mnt/user/<share>/Scan-Splitter/stacks` |
+   | Scanner | e.g. `/mnt/user/<share>/Scan-Splitter/scanner` |
    | Work | `/mnt/user/appdata/scan-stack-splitter` |
    | `MISTRAL_API_KEY` | your key (masked in the UI) |
    | `MISTRAL_LLM_MODEL` | e.g. `mistral-large-latest` or a pinned version |
@@ -28,25 +29,42 @@ Everything it does is visible in the container log.
    | `OCRMYPDF_JOBS` | leave some cores for the rest of the server |
 
 4. **Apply**. On first start, the container creates `inbox/`, `output/`,
-   `archive/` and `failed/` under Documents.
+   `archive/` and `failed/` under both Stacks and Scanner.
 
 ## Use
 
-- Copy a scanned stack into `inbox/` or a sub-folder of it, for example
-  `inbox/Person A/stack-01.pdf`. The file is picked up once it has stopped
-  growing for 60 seconds, so copying over SMB is safe.
-- The documents appear in `output/Person A/`. The original stack moves to
-  `archive/Person A/`.
-- Each stack has its own folder under Work: `Person A/stack-01-<hash>/`. Its
-  `review.md` lists every document and flags uncertain splits.
+### Stacks
+
+- Copy a scanned stack into `stacks/inbox/` or a sub-folder of it, for example
+  `stacks/inbox/Person A/stack-01.pdf`. The file is picked up once it has
+  stopped growing for 60 seconds, so copying over SMB is safe.
+- The documents appear in `stacks/output/Person A/`. The original stack moves
+  to `stacks/archive/Person A/`.
+- Each stack has its own folder under Work: `stacks/Person A/stack-01-<hash>/`.
+  Its `review.md` lists every document and flags uncertain splits.
 - To correct a split, edit `plan.json` in that folder, then run:
 
   ```bash
-  docker exec scan-stack-splitter stacksplit rebuild "Person A/stack-01-<hash>"
+  docker exec scan-stack-splitter stacksplit rebuild "stacks/Person A/stack-01-<hash>"
   ```
 
-- If a stack fails, it lands in `failed/` next to an `.error.txt`. Move it back
-  into `inbox/` to retry: the OCR already paid for is reused.
+### Scanner
+
+- Set the scanner to save **PDF** to a network folder: the SMB share path of
+  `scanner/inbox/`. Its own text recognition can stay off, because every file
+  gets a fresh OCR pass here anyway.
+- Each file becomes one document in `scanner/output/`, named by content. It is
+  never split. Blank pages are dropped. The original moves to
+  `scanner/archive/`.
+- The SMB user the scanner logs in with needs write access to
+  `scanner/inbox/`. The container itself reads and moves the files as
+  `nobody:users`.
+
+### Failures
+
+If a file fails, it lands in that input's `failed/` folder next to an
+`.error.txt`. Move it back into `inbox/` to retry: the OCR already paid for is
+reused.
 
 ## Notes
 

@@ -1,4 +1,9 @@
-"""Poll the inbox and process every PDF once it has stopped growing."""
+"""Poll each profile's inbox and process every PDF once it has stopped growing.
+
+Every profile gets its own worker thread: a document from the scanner must
+not wait half an hour behind a 500-page stack. The Mistral client is shared,
+so both workers stay within the same request-rate limit.
+"""
 
 from __future__ import annotations
 
@@ -10,7 +15,7 @@ import time
 import traceback
 from pathlib import Path, PurePosixPath
 
-from .config import Settings
+from .config import Profile, Settings
 from .naming import unique_path
 from .pipeline import process_stack
 
@@ -20,24 +25,16 @@ HEARTBEAT = Path("/tmp/stacksplit.heartbeat")
 
 
 class InboxWatcher:
-    def __init__(self, settings: Settings, backend) -> None:
+    def __init__(self, settings: Settings, profile: Profile, backend, stop: threading.Event) -> None:
         self.settings = settings
+        self.profile = profile
         self.backend = backend
+        self.stop = stop
         # path -> (size, mtime_ns, monotonic time the file last changed)
         self._seen: dict[Path, tuple[int, int, float]] = {}
-        self._stop = False
-
-    def _heartbeat(self) -> None:
-        while not self._stop:
-            HEARTBEAT.touch()
-            time.sleep(30)
-
-    def stop(self, *_: object) -> None:
-        log.info("shutdown requested")
-        self._stop = True
 
     def _candidates(self) -> list[Path]:
-        inbox = self.settings.inbox_dir
+        inbox = self.profile.inbox
         return sorted(
             p
             for p in inbox.rglob("*")
@@ -65,47 +62,64 @@ class InboxWatcher:
         return target
 
     def process(self, path: Path) -> None:
-        folder = PurePosixPath(path.parent.relative_to(self.settings.inbox_dir).as_posix())
+        folder = PurePosixPath(path.parent.relative_to(self.profile.inbox).as_posix())
         try:
-            process_stack(path, folder, self.settings, self.backend)
-        except Exception as exc:  # noqa: BLE001 - one bad stack must not stop the watcher
-            log.exception("stack failed", extra={"source": (folder / path.name).as_posix()})
-            target = self._move(path, self.settings.failed_dir, folder)
+            process_stack(path, folder, self.settings, self.backend, self.profile)
+        except Exception as exc:  # noqa: BLE001 - one bad file must not stop the watcher
+            log.exception("stack failed", extra={"profile": self.profile.name, "source": (folder / path.name).as_posix()})
+            target = self._move(path, self.profile.failed, folder)
             target.with_name(target.name + ".error.txt").write_text(
                 f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}", encoding="utf-8"
             )
         else:
-            self._move(path, self.settings.archive_dir, folder)
+            self._move(path, self.profile.archive, folder)
         finally:
             self._seen.pop(path, None)
 
+    def poll_once(self) -> None:
+        now = time.monotonic()
+        for path in self._candidates():
+            if self.stop.is_set():
+                return
+            if self._ready(path, now):
+                self.process(path)
+        # Forget files that vanished from the inbox.
+        self._seen = {p: v for p, v in self._seen.items() if p.exists()}
+
     def run(self) -> None:
-        for directory in (
-            self.settings.inbox_dir,
-            self.settings.output_dir,
-            self.settings.work_dir,
-            self.settings.archive_dir,
-            self.settings.failed_dir,
-        ):
+        for directory in (self.profile.inbox, self.profile.output, self.profile.archive, self.profile.failed):
             directory.mkdir(parents=True, exist_ok=True)
+        log.info("watching inbox", extra={"profile": self.profile.name, "inbox": str(self.profile.inbox)})
+        while not self.stop.is_set():
+            try:
+                self.poll_once()
+            except Exception:  # noqa: BLE001 - e.g. the share went away for a moment
+                log.exception("inbox poll failed", extra={"profile": self.profile.name})
+            self.stop.wait(self.settings.poll_interval)
 
-        signal.signal(signal.SIGTERM, self.stop)
-        signal.signal(signal.SIGINT, self.stop)
-        # One stack can take an hour; the healthcheck must not flag that as hung.
-        threading.Thread(target=self._heartbeat, daemon=True).start()
-        log.info("watching inbox", extra={"inbox": str(self.settings.inbox_dir), "poll_s": self.settings.poll_interval})
 
-        while not self._stop:
-            now = time.monotonic()
-            for path in self._candidates():
-                if self._stop:
-                    break
-                if self._ready(path, now):
-                    self.process(path)
-            # Forget files that vanished from the inbox.
-            self._seen = {p: v for p, v in self._seen.items() if p.exists()}
-            for _ in range(self.settings.poll_interval):
-                if self._stop:
-                    break
-                time.sleep(1)
-        log.info("stopped")
+def run_all(settings: Settings, backend) -> None:
+    """Watch every enabled profile until SIGTERM/SIGINT."""
+    settings.work_dir.mkdir(parents=True, exist_ok=True)
+    stop = threading.Event()
+
+    def request_stop(*_: object) -> None:
+        log.info("shutdown requested")
+        stop.set()
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
+
+    workers = [
+        threading.Thread(target=InboxWatcher(settings, profile, backend, stop).run, name=profile.name, daemon=True)
+        for profile in settings.profiles
+    ]
+    for worker in workers:
+        worker.start()
+
+    # The main thread keeps the healthcheck heartbeat going; a single stack
+    # can take an hour, which must not count as hung.
+    while not stop.is_set() and any(worker.is_alive() for worker in workers):
+        HEARTBEAT.touch()
+        stop.wait(30)
+    log.info("stopped")

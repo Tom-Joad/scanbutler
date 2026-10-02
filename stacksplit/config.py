@@ -55,6 +55,35 @@ def _bool(name: str, default: bool) -> bool:
 
 
 @dataclass(frozen=True)
+class Profile:
+    """One input channel with its own folders.
+
+    `stacks` takes large scans holding many documents and splits them;
+    `scanner` takes what a document scanner drops off, one document per file.
+    """
+
+    name: str
+    root: Path
+    split: bool
+
+    @property
+    def inbox(self) -> Path:
+        return self.root / "inbox"
+
+    @property
+    def output(self) -> Path:
+        return self.root / "output"
+
+    @property
+    def archive(self) -> Path:
+        return self.root / "archive"
+
+    @property
+    def failed(self) -> Path:
+        return self.root / "failed"
+
+
+@dataclass(frozen=True)
 class Settings:
     api_key: str
     api_base: str
@@ -63,11 +92,8 @@ class Settings:
     request_timeout: float
     max_rps: float
 
-    inbox_dir: Path
-    output_dir: Path
+    profiles: tuple[Profile, ...]
     work_dir: Path
-    archive_dir: Path
-    failed_dir: Path
 
     poll_interval: int
     stable_seconds: int
@@ -118,6 +144,13 @@ class Settings:
             raise ConfigError(f"OCR_MODE must be batch or direct, got {ocr_mode!r}")
 
         data = Path(_str("DATA_DIR", "/data"))
+        profiles = [
+            Profile(name, Path(_str(f"{name.upper()}_DIR", str(data / name))), split)
+            for name, split in (("stacks", True), ("scanner", False))
+            if _bool(f"{name.upper()}_ENABLED", True)
+        ]
+        if not profiles:
+            raise ConfigError("STACKS_ENABLED and SCANNER_ENABLED are both off")
         return cls(
             api_key=api_key,
             api_base=_str("MISTRAL_API_BASE", "https://api.mistral.ai/v1").rstrip("/"),
@@ -125,11 +158,8 @@ class Settings:
             llm_model=_str("MISTRAL_LLM_MODEL", "mistral-large-latest"),
             request_timeout=_float("MISTRAL_TIMEOUT", 300.0),
             max_rps=_float("MISTRAL_MAX_RPS", 1.0),
-            inbox_dir=Path(_str("INBOX_DIR", str(data / "inbox"))),
-            output_dir=Path(_str("OUTPUT_DIR", str(data / "output"))),
+            profiles=tuple(profiles),
             work_dir=Path(_str("WORK_DIR", str(data / "work"))),
-            archive_dir=Path(_str("ARCHIVE_DIR", str(data / "archive"))),
-            failed_dir=Path(_str("FAILED_DIR", str(data / "failed"))),
             poll_interval=_int("POLL_INTERVAL", 30, minimum=1),
             stable_seconds=_int("STABLE_SECONDS", 60, minimum=0),
             ocr_chunk_pages=_int("OCR_CHUNK_PAGES", 50, minimum=1),
@@ -155,3 +185,9 @@ class Settings:
             ocrmypdf_extra_args=os.environ.get("OCRMYPDF_EXTRA_ARGS", "").strip(),
             log_level=_str("LOG_LEVEL", "INFO"),
         )
+
+    def profile(self, name: str) -> Profile:
+        for profile in self.profiles:
+            if profile.name == name:
+                return profile
+        raise ConfigError(f"profile {name!r} is not enabled")

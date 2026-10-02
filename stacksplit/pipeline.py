@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from . import boundaries, metadata, pdfops
-from .config import Settings
+from .config import Profile, Settings
 from .naming import build_stem, unique_path
 from .llm_cache import CachedChat
 from .ocr import BatchOptions, Page, run_ocr
@@ -47,9 +47,9 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def work_dir_for(settings: Settings, folder: PurePosixPath, src: Path, digest: str) -> Path:
+def work_dir_for(settings: Settings, profile: Profile, folder: PurePosixPath, src: Path, digest: str) -> Path:
     # The hash suffix keeps two different scans with the same file name apart.
-    return settings.work_dir / folder / f"{src.stem}-{digest[:8]}"
+    return settings.work_dir / profile.name / folder / f"{src.stem}-{digest[:8]}"
 
 
 def group_segments(pages: list[Page], decisions: list[boundaries.Decision]) -> list[Segment]:
@@ -95,6 +95,7 @@ def build_plan(
     digest: str,
     folder: PurePosixPath,
     decisions_path: Path | None = None,
+    split: bool = True,
 ) -> Plan:
     def is_blank(page: Page) -> bool:
         return page.is_blank(settings.blank_max_chars, settings.blank_max_ink)
@@ -105,9 +106,15 @@ def build_plan(
         raise RuntimeError("every page of the stack is blank")
     log.info("blank pages detected", extra={"blank": len(blank), "content": len(content)})
 
-    decisions = boundaries.detect_boundaries(
-        content, backend, settings.boundary_window, settings.boundary_step, settings.llm_concurrency
-    )
+    if split:
+        decisions = boundaries.detect_boundaries(
+            content, backend, settings.boundary_window, settings.boundary_step, settings.llm_concurrency
+        )
+    else:
+        # A scanner file is one document by definition; no model is asked.
+        decisions = [
+            boundaries.Decision(p.index, i == 0, 1.0, "single document per file") for i, p in enumerate(content)
+        ]
     if decisions_path is not None:
         # Per-page verdicts with reasons: the first thing to read when a split is wrong.
         decisions_path.write_text(
@@ -193,15 +200,16 @@ def _retitle(plan: Plan, work: Path, settings: Settings, backend) -> None:
 
 
 def write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
-    out_dir = settings.output_dir / plan.folder
-    out_root = settings.output_dir.resolve()
+    output = settings.profile(plan.profile).output
+    out_dir = output / plan.folder
+    out_root = output.resolve()
 
     # Validate everything before touching a single file.
     page_lists = [parse_pages(doc.pages, plan.page_count) for doc in plan.documents]
 
     # A rebuild replaces what the previous run of this plan wrote.
     for name in plan.written_files:
-        old = (settings.output_dir / name).resolve()
+        old = (output / name).resolve()
         if old.is_relative_to(out_root):
             old.unlink(missing_ok=True)
     plan.written_files = []
@@ -213,7 +221,7 @@ def write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
         target = unique_path(out_dir, stem, taken=set(written))
         pdfops.write_document(work / SEARCHABLE, indices, target, doc.title or stem, doc.summary)
         written.append(target)
-        plan.written_files.append(target.relative_to(settings.output_dir).as_posix())
+        plan.written_files.append(target.relative_to(output).as_posix())
         # Saved per file so a crash mid-way still knows what to clean up.
         plan.save(work / PLAN)
 
@@ -251,13 +259,13 @@ def write_review(plan: Plan, work: Path) -> None:
     (work / REVIEW).write_text("\n".join(lines), encoding="utf-8")
 
 
-def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend) -> Path:
-    """Run the whole pipeline for one stack. Returns the stack's work directory."""
+def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend, profile: Profile) -> Path:
+    """Run the whole pipeline for one input file. Returns its work directory."""
     digest = sha256(src)
-    work = work_dir_for(settings, folder, src, digest)
+    work = work_dir_for(settings, profile, folder, src, digest)
     work.mkdir(parents=True, exist_ok=True)
     source = (folder / src.name).as_posix()
-    log.info("stack started", extra={"source": source, "work_dir": str(work)})
+    log.info("stack started", extra={"profile": profile.name, "source": source, "work_dir": str(work)})
 
     batch = (
         BatchOptions(settings.batch_poll_seconds, settings.batch_max_wait_hours * 3600)
@@ -293,13 +301,15 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend)
         log.info("existing plan reused", extra={"source": source})
     else:
         chat = CachedChat(backend, work / LLM_CACHE)
-        plan = build_plan(pages, settings, chat, source, digest, folder, work / DECISIONS)
+        plan = build_plan(pages, settings, chat, source, digest, folder, work / DECISIONS, split=profile.split)
+        plan.profile = profile.name
         plan.save(plan_path)
 
     written = write_outputs(plan, work, settings)
     log.info(
         "stack done",
         extra={
+            "profile": profile.name,
             "source": source,
             "documents": len(written),
             "needs_review": sum(d.needs_review for d in plan.documents),

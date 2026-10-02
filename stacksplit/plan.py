@@ -67,11 +67,13 @@ class Plan:
     source: str
     source_sha256: str
     page_count: int
-    # Output sub-folder, relative to OUTPUT_DIR; mirrors the inbox sub-folder.
+    # Output sub-folder, relative to the profile's output; mirrors the inbox sub-folder.
     folder: str
     documents: list[PlannedDocument]
     dropped_pages: str = ""
     written_files: list[str] = field(default_factory=list)
+    # Which profile's output folder `folder` and `written_files` are relative to.
+    profile: str = "stacks"
 
     def save(self, path: Path) -> None:
         tmp = path.with_suffix(".tmp")
