@@ -37,6 +37,9 @@ def test_reports_counts_on_change_and_heartbeat_only(settings):
         "waiting": 2,
         "processing": 1,
         "failed": 1,
+        "paused": False,
+        "pause_reason": None,
+        "paused_since": None,
         "profiles": {
             "stacks": {"waiting": 1, "processing": 1, "failed": 0},
             "scanner": {"waiting": 1, "processing": 0, "failed": 1},

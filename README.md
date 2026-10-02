@@ -122,6 +122,7 @@ The ones you are most likely to change:
 | `STACKS_DIR` / `SCANNER_DIR` | `/data/stacks`, `/data/scanner` | Root of each input |
 | `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
 | `QUEUE_WEBHOOK_URL` | — | Report queue counts here, see below |
+| `PAUSE_RETRY_MINUTES` | `30` | Probe interval while paused by a spending limit |
 | `TITLE_LANGUAGE` | language of the document | e.g. `German` |
 | `FILENAME_PATTERN` | `{title} {date}` | `{date}` is `YYYY-MM-DD` |
 | `NO_DATE_LABEL` | `undated` | Used when no date is found |
@@ -139,6 +140,7 @@ after a restart. The payload holds counts only, never file names:
 ```json
 {
   "queued": 3, "waiting": 2, "processing": 1, "failed": 0,
+  "paused": false, "pause_reason": null, "paused_since": null,
   "profiles": {
     "stacks":  {"waiting": 1, "processing": 1, "failed": 0},
     "scanner": {"waiting": 1, "processing": 0, "failed": 0}
@@ -147,7 +149,9 @@ after a restart. The payload holds counts only, never file names:
 ```
 
 `queued` is `waiting + processing`. `failed` counts the PDFs in the `failed/`
-folders. If the receiver is unreachable, a warning is logged and processing
+folders. `paused`, `pause_reason` and `paused_since` are always present. The
+last two are `null` unless processing is paused, see
+[Spending limit](#spending-limit-and-paused-processing). If the receiver is unreachable, a warning is logged and processing
 carries on. Every send and every failure (with the error, but never the URL) appears in
 the container log; a repeated, unchanged error is logged once per heartbeat
 interval.
@@ -176,10 +180,36 @@ template:
         unique_id: scan_splitter_failed
         state: "{{ trigger.json.failed }}"
         unit_of_measurement: files
+    binary_sensor:
+      - name: Scan-Splitter paused
+        unique_id: scan_splitter_paused
+        state: "{{ trigger.json.paused | default(false) }}"
+        attributes:
+          reason: "{{ trigger.json.pause_reason }}"
+          since: "{{ trigger.json.paused_since }}"
 ```
 
 Then set
 `QUEUE_WEBHOOK_URL=http://<home-assistant>:8123/api/webhook/scan-splitter-queue-CHANGE-ME`.
+
+## Spending limit and paused processing
+
+When Mistral refuses the account, processing pauses instead of moving file
+after file to `failed/`. That happens with a reached spending limit, an
+exhausted quota or a rejected API key. What counts as a refusal: HTTP 401, 402
+or 403, or a 429 that is not the ordinary per-second rate limit. Mistral does
+not document how a reached spending limit is answered, so this errs on the
+side of pausing.
+
+While paused:
+
+- Files stay in their inboxes, including the one that hit the limit.
+- The log shows `processing paused` with Mistral's error text. The webhook
+  reports `"paused": true` with `pause_reason` and `paused_since`.
+- Every `PAUSE_RETRY_MINUTES` (default 30), one file is tried as a probe. If
+  it goes through, for example after you raised the limit or a new month
+  started, processing resumes on its own and the log shows
+  `processing resumed`.
 
 ## Rate limits
 

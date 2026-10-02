@@ -18,6 +18,7 @@ from pathlib import Path, PurePosixPath
 from .config import Profile, Settings
 from .naming import unique_path
 from .notify import QueueReporter
+from .pause import PauseGate, limit_error_in
 from .pipeline import process_stack
 
 log = logging.getLogger(__name__)
@@ -33,12 +34,14 @@ class InboxWatcher:
         backend,
         stop: threading.Event,
         reporter: QueueReporter | None = None,
+        gate: PauseGate | None = None,
     ) -> None:
         self.settings = settings
         self.profile = profile
         self.backend = backend
         self.stop = stop
         self.reporter = reporter
+        self.gate = gate or PauseGate(settings.pause_retry_minutes * 60)
         # path -> (size, mtime_ns, monotonic time the file last changed)
         self._seen: dict[Path, tuple[int, int, float]] = {}
 
@@ -77,12 +80,19 @@ class InboxWatcher:
         try:
             process_stack(path, folder, self.settings, self.backend, self.profile)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the watcher
+            if limit := limit_error_in(exc):
+                # Not this file's fault: leave it in the inbox and stop
+                # sending more until the account accepts work again.
+                self.gate.pause(str(limit))
+                return
+            self.gate.done()
             log.exception("stack failed", extra={"profile": self.profile.name, "source": (folder / path.name).as_posix()})
             target = self._move(path, self.profile.failed, folder)
             target.with_name(target.name + ".error.txt").write_text(
                 f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}", encoding="utf-8"
             )
         else:
+            self.gate.done()
             self._move(path, self.profile.archive, folder)
         finally:
             self._seen.pop(path, None)
@@ -95,6 +105,8 @@ class InboxWatcher:
             if self.stop.is_set():
                 return
             if self._ready(path, now):
+                if not self.gate.may_process():
+                    break
                 self.process(path)
         # Forget files that vanished from the inbox.
         self._seen = {p: v for p, v in self._seen.items() if p.exists()}
@@ -123,6 +135,7 @@ def run_all(settings: Settings, backend) -> None:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
+    gate = PauseGate(settings.pause_retry_minutes * 60)
     reporter = None
     if settings.queue_webhook_url:
         reporter = QueueReporter(
@@ -130,13 +143,14 @@ def run_all(settings: Settings, backend) -> None:
             settings.profiles,
             settings.queue_webhook_check_seconds,
             settings.queue_webhook_heartbeat_seconds,
+            gate=gate,
         )
         threading.Thread(target=reporter.run, args=(stop,), name="queue-webhook", daemon=True).start()
         log.info("queue webhook enabled", extra={"heartbeat_s": settings.queue_webhook_heartbeat_seconds})
 
     workers = [
         threading.Thread(
-            target=InboxWatcher(settings, profile, backend, stop, reporter).run, name=profile.name, daemon=True
+            target=InboxWatcher(settings, profile, backend, stop, reporter, gate).run, name=profile.name, daemon=True
         )
         for profile in settings.profiles
     ]

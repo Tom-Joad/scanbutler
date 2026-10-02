@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from .config import Profile
+from .pause import PauseGate
 
 log = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ class QueueReporter:
     check_seconds: float = 10.0
     heartbeat_seconds: float = 300.0
     timeout: float = 10.0
+    gate: PauseGate | None = None
     _processing: dict[str, bool] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _last_sent: dict | None = None
@@ -86,7 +88,8 @@ class QueueReporter:
                 "failed": count_pdfs(profile.failed),
             }
         totals = {key: sum(p[key] for p in per_profile.values()) for key in ("waiting", "processing", "failed")}
-        return {"queued": totals["waiting"] + totals["processing"], **totals, "profiles": per_profile}
+        pause = self.gate.status() if self.gate else {"paused": False, "pause_reason": None, "paused_since": None}
+        return {"queued": totals["waiting"] + totals["processing"], **totals, **pause, "profiles": per_profile}
 
     def report_if_due(self, client: httpx.Client, now: float) -> bool:
         state = self.snapshot()
@@ -117,6 +120,7 @@ class QueueReporter:
                 "waiting": state["waiting"],
                 "processing": state["processing"],
                 "failed": state["failed"],
+                "paused": state["paused"],
             },
         )
         self._last_sent, self._last_time = state, now

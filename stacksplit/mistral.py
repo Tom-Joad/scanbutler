@@ -26,6 +26,33 @@ class MistralError(RuntimeError):
     """Raised when the API returns an unusable answer after all retries."""
 
 
+class MistralLimitError(MistralError):
+    """The account cannot be used right now: spending limit, exhausted quota or a rejected key.
+
+    Retrying the next file would fail the same way, so the watcher pauses
+    instead of moving file after file to failed/.
+    """
+
+
+# How Mistral answers a reached spending limit is not documented. Reports
+# range from a bare 401 to 402/403; 429 is used for the ordinary
+# per-second rate limit, which is retried, but may carry a quota message too.
+_LIMIT_STATUS = {401, 402, 403}
+
+
+def is_limit_response(response: httpx.Response) -> bool:
+    if response.status_code in _LIMIT_STATUS:
+        return True
+    if response.status_code != 429:
+        return False
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    ordinary = body.get("type") == "rate_limited" or "rate limit exceeded" in str(body.get("message", "")).lower()
+    return not ordinary
+
+
 class MistralClient:
     def __init__(
         self,
@@ -96,6 +123,9 @@ class MistralClient:
 
             if response.status_code < 400:
                 return response
+
+            if is_limit_response(response):
+                raise MistralLimitError(f"{path}: HTTP {response.status_code}: {response.text[:300]}")
 
             if response.status_code in _RETRY_STATUS and attempt < self.max_attempts:
                 self._back_off(attempt, response.headers.get("retry-after"), path, response.status_code)

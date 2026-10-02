@@ -122,6 +122,7 @@ class Settings:
     ocrmypdf_jobs: int
     ocrmypdf_extra_args: str
 
+    pause_retry_minutes: float
     queue_webhook_url: str
     queue_webhook_check_seconds: int
     queue_webhook_heartbeat_seconds: int
@@ -187,6 +188,7 @@ class Settings:
             ocrmypdf_languages=_str("OCRMYPDF_LANGUAGES", "deu+eng"),
             ocrmypdf_jobs=_int("OCRMYPDF_JOBS", os.cpu_count() or 1, minimum=1),
             ocrmypdf_extra_args=os.environ.get("OCRMYPDF_EXTRA_ARGS", "").strip(),
+            pause_retry_minutes=_float("PAUSE_RETRY_MINUTES", 30.0),
             queue_webhook_url=os.environ.get("QUEUE_WEBHOOK_URL", "").strip(),
             queue_webhook_check_seconds=_int("QUEUE_WEBHOOK_CHECK_SECONDS", 10, minimum=1),
             queue_webhook_heartbeat_seconds=_int("QUEUE_WEBHOOK_HEARTBEAT_SECONDS", 300, minimum=10),
