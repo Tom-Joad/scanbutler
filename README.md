@@ -21,13 +21,16 @@ layer comes from a fresh Tesseract pass via [ocrmypdf](https://ocrmypdf.readthed
 
 1. **OCR**: The stack is sent to Mistral OCR in chunks of 50 pages. Each chunk's
    result is cached, so an interrupted run never pays for the same page twice.
-2. **Blank pages**: Pages without text or images, typically duplex back sides,
-   are dropped.
+2. **Blank pages**: Pages are dropped when their image shows almost no ink,
+   typically duplex back sides. The measurement is on the scan itself, not on
+   the OCR text: OCR models occasionally hallucinate whole paragraphs on an
+   empty page.
 3. **Boundaries**: A chat model reads overlapping windows of 12 pages. It decides
    for each page whether that page starts a new document, using letterheads,
    salutations, headings, dates, layout changes and text that continues across
    pages. Each page's verdict comes from the window where it had the most
-   context. Explicit "page *k* of *n*" markers override the model.
+   context. Explicit "page *k* of *n*" markers override the model. A second
+   copy of a document is kept as its own file (it shows up as `... (2).pdf`).
 4. **Naming**: Each document gets a short topic title in the document's language
    (configurable) and the date it is about: the examination or sampling date for
    reports, otherwise the issue date.
@@ -50,8 +53,10 @@ cached OCR is reused.
 Without separator sheets, splitting cannot be perfect. Every stack gets a work
 directory, `work/<sub-folder>/<stack name>-<hash>/`, containing:
 
-- `review.md`: every document with its page range and confidence. Uncertain
-  splits are flagged ⚠ with the model's reason.
+- `review.md`: every document with its page range and confidence. Documents
+  are flagged ⚠ when they start in the middle ("page 3 of 5"), consist of a
+  single nearly empty page, or the model was unsure.
+- `decisions.json`: the model's verdict and reason for every page.
 - `plan.json`: the split plan, meant to be edited by hand. Page numbers are
   1-based ranges such as `"4-6, 9"`.
 
@@ -88,13 +93,29 @@ The ones you are most likely to change:
 | Variable | Default | Purpose |
 |---|---|---|
 | `MISTRAL_API_KEY` | — | Required |
-| `MISTRAL_LLM_MODEL` | `mistral-medium-latest` | Model for splitting and naming |
+| `MISTRAL_LLM_MODEL` | `mistral-large-latest` | Model for splitting and naming |
+| `MISTRAL_MAX_RPS` | `1` | Requests per second; set to your account's limit |
 | `TITLE_LANGUAGE` | language of the document | e.g. `German` |
 | `FILENAME_PATTERN` | `{title} {date}` | `{date}` is `YYYY-MM-DD` |
 | `NO_DATE_LABEL` | `undated` | Used when no date is found |
 | `REVIEW_CONFIDENCE` | `0.75` | Below this, a split is flagged |
 | `OCRMYPDF_LANGUAGES` | `deu+eng` | Only `deu`, `eng` ship as best models |
 | `OCRMYPDF_EXTRA_ARGS` | — | Appended to the ocrmypdf call |
+
+## Rate limits
+
+Mistral limits requests per second and tokens per minute, per model and per
+account tier. The values are not published. Look them up in Mistral's admin
+panel under **API › Limits** and set `MISTRAL_MAX_RPS` slightly below the
+requests-per-second limit of your `MISTRAL_LLM_MODEL`. Should a request still
+hit the limit, all workers pause together and retry.
+
+The number of requests depends on the content of the stack. Splitting takes
+one request per 6 pages. Naming takes one request per document found. A
+500-page stack with around 200 documents therefore needs about 280 requests,
+which is roughly 20 minutes at 0.25 requests per second. Every answer is
+cached in the work directory, so an interrupted run resumes without asking
+again.
 
 ## Privacy
 

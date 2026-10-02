@@ -18,7 +18,12 @@ log = logging.getLogger("stacksplit")
 
 def _client(settings: Settings) -> MistralClient:
     return MistralClient(
-        settings.api_key, settings.api_base, settings.ocr_model, settings.llm_model, settings.request_timeout
+        settings.api_key,
+        settings.api_base,
+        settings.ocr_model,
+        settings.llm_model,
+        settings.request_timeout,
+        max_rps=settings.max_rps,
     )
 
 

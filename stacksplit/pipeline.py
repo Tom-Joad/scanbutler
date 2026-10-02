@@ -8,15 +8,17 @@ where it stopped instead of paying again.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import shutil
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 
 from . import boundaries, metadata, pdfops
 from .config import Settings
 from .naming import build_stem, unique_path
+from .llm_cache import CachedChat
 from .ocr import Page, run_ocr
 from .plan import Plan, PlannedDocument, format_pages, parse_pages
 
@@ -25,6 +27,9 @@ log = logging.getLogger(__name__)
 SEARCHABLE = "searchable.pdf"
 PLAN = "plan.json"
 REVIEW = "review.md"
+INK = "ink.json"
+DECISIONS = "decisions.json"
+LLM_CACHE = "llm"
 
 
 @dataclass
@@ -60,8 +65,17 @@ def group_segments(pages: list[Page], decisions: list[boundaries.Decision]) -> l
     return segments
 
 
+NEARLY_EMPTY_CHARS = 60
+
+
 def _review_reason(segment: Segment, threshold: float) -> str:
     reasons = []
+    first = segment.pages[0]
+    marker = boundaries.page_marker(first)
+    if marker and marker[0] > 1:
+        reasons.append(f"starts with page {marker[0]} of {marker[1]}; earlier pages missing or misplaced")
+    if len(segment.pages) == 1 and first.text_chars() < NEARLY_EMPTY_CHARS:
+        reasons.append(f"single, nearly empty page {first.number}")
     if segment.start.confidence < threshold:
         reasons.append(
             f"uncertain split before page {segment.start.page_index + 1} "
@@ -74,10 +88,19 @@ def _review_reason(segment: Segment, threshold: float) -> str:
 
 
 def build_plan(
-    pages: list[Page], settings: Settings, backend, source: str, digest: str, folder: PurePosixPath
+    pages: list[Page],
+    settings: Settings,
+    backend,
+    source: str,
+    digest: str,
+    folder: PurePosixPath,
+    decisions_path: Path | None = None,
 ) -> Plan:
-    blank = [p for p in pages if p.is_blank(settings.blank_max_chars)]
-    content = [p for p in pages if not p.is_blank(settings.blank_max_chars)]
+    def is_blank(page: Page) -> bool:
+        return page.is_blank(settings.blank_max_chars, settings.blank_max_ink)
+
+    blank = [p for p in pages if is_blank(p)]
+    content = [p for p in pages if not is_blank(p)]
     if not content:
         raise RuntimeError("every page of the stack is blank")
     log.info("blank pages detected", extra={"blank": len(blank), "content": len(content)})
@@ -85,6 +108,19 @@ def build_plan(
     decisions = boundaries.detect_boundaries(
         content, backend, settings.boundary_window, settings.boundary_step, settings.llm_concurrency
     )
+    if decisions_path is not None:
+        # Per-page verdicts with reasons: the first thing to read when a split is wrong.
+        decisions_path.write_text(
+            json.dumps(
+                [
+                    {"page": d.page_index + 1, "starts_new": d.starts_new, "confidence": d.confidence, "reason": d.reason}
+                    for d in decisions
+                ],
+                ensure_ascii=False,
+                indent=1,
+            ),
+            encoding="utf-8",
+        )
     segments = group_segments(content, decisions)
 
     if not settings.drop_blank_pages:
@@ -99,7 +135,7 @@ def build_plan(
         described = list(
             pool.map(
                 lambda s: metadata.describe(
-                    [p for p in s.pages if not p.is_blank(settings.blank_max_chars)] or s.pages,
+                    [p for p in s.pages if not is_blank(p)] or s.pages,
                     backend,
                     settings.title_language,
                     settings.metadata_max_chars,
@@ -149,9 +185,10 @@ def _retitle(plan: Plan, work: Path, settings: Settings, backend) -> None:
         raise RuntimeError("documents without a title need the Mistral API, but no API key is configured")
     # Every chunk is cached already, so this costs no OCR calls.
     pages = run_ocr(work / SEARCHABLE, work / "ocr", backend, settings.ocr_chunk_pages, settings.ocr_concurrency)
+    chat = CachedChat(backend, work / LLM_CACHE)
     for doc in missing:
         selected = [pages[i] for i in parse_pages(doc.pages, plan.page_count)]
-        meta = metadata.describe(selected, backend, settings.title_language, settings.metadata_max_chars)
+        meta = metadata.describe(selected, chat, settings.title_language, settings.metadata_max_chars)
         doc.title, doc.date, doc.issuer, doc.summary = meta.title, meta.date, meta.issuer, meta.summary
 
 
@@ -224,6 +261,16 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend)
 
     pages = run_ocr(src, work / "ocr", backend, settings.ocr_chunk_pages, settings.ocr_concurrency)
 
+    ink_path = work / INK
+    if ink_path.exists():
+        ink = json.loads(ink_path.read_text(encoding="utf-8"))
+    else:
+        ink = pdfops.ink_coverage(src)
+        ink_path.write_text(json.dumps(ink), encoding="utf-8")
+    if len(ink) != len(pages):
+        raise RuntimeError("ink measurement and OCR result disagree on the page count")
+    pages = [replace(page, ink=value) for page, value in zip(pages, ink)]
+
     searchable = work / SEARCHABLE
     if not searchable.exists():
         if settings.ocrmypdf_enabled:
@@ -240,7 +287,8 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend)
         plan = Plan.load(plan_path)
         log.info("existing plan reused", extra={"source": source})
     else:
-        plan = build_plan(pages, settings, backend, source, digest, folder)
+        chat = CachedChat(backend, work / LLM_CACHE)
+        plan = build_plan(pages, settings, chat, source, digest, folder, work / DECISIONS)
         plan.save(plan_path)
 
     written = write_outputs(plan, work, settings)

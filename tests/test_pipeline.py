@@ -16,7 +16,7 @@ STACK = [
     "",  # duplex back side
     "LETTER Befundbericht CT\nThorax ohne Befund",
     "Beurteilung: unauffaellig unsure",
-    "LETTER Rechnung\nBetrag 42 EUR",
+    "LETTER Rechnung\nBetrag 42 EUR fuer Laborleistungen nach GOAE, zahlbar innerhalb von 30 Tagen",
     "",
 ]
 

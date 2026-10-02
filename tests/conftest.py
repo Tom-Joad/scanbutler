@@ -73,6 +73,8 @@ def settings(tmp_path, monkeypatch) -> Settings:
         "BOUNDARY_STEP": "2",
         "OCRMYPDF_ENABLED": "false",
         "STABLE_SECONDS": "0",
+        # Test PDFs are truly blank pages; blankness comes from FakeBackend text.
+        "BLANK_MAX_INK_PERCENT": "0",
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)

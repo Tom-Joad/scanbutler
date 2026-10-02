@@ -61,6 +61,7 @@ class Settings:
     ocr_model: str
     llm_model: str
     request_timeout: float
+    max_rps: float
 
     inbox_dir: Path
     output_dir: Path
@@ -80,6 +81,7 @@ class Settings:
     review_confidence: float
     drop_blank_pages: bool
     blank_max_chars: int
+    blank_max_ink: float
     metadata_max_chars: int
 
     title_language: str
@@ -113,8 +115,9 @@ class Settings:
             api_key=api_key,
             api_base=_str("MISTRAL_API_BASE", "https://api.mistral.ai/v1").rstrip("/"),
             ocr_model=_str("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
-            llm_model=_str("MISTRAL_LLM_MODEL", "mistral-medium-latest"),
+            llm_model=_str("MISTRAL_LLM_MODEL", "mistral-large-latest"),
             request_timeout=_float("MISTRAL_TIMEOUT", 300.0),
+            max_rps=_float("MISTRAL_MAX_RPS", 1.0),
             inbox_dir=Path(_str("INBOX_DIR", str(data / "inbox"))),
             output_dir=Path(_str("OUTPUT_DIR", str(data / "output"))),
             work_dir=Path(_str("WORK_DIR", str(data / "work"))),
@@ -130,6 +133,8 @@ class Settings:
             review_confidence=_float("REVIEW_CONFIDENCE", 0.75),
             drop_blank_pages=_bool("DROP_BLANK_PAGES", True),
             blank_max_chars=_int("BLANK_MAX_CHARS", 15),
+            # Percent of the page area: blank scans measure 0-0.2 %, a sparse text page about 1 %.
+            blank_max_ink=_float("BLANK_MAX_INK_PERCENT", 0.2) / 100,
             metadata_max_chars=_int("METADATA_MAX_CHARS", 24000, minimum=1000),
             title_language=_str("TITLE_LANGUAGE", "the language of the document"),
             filename_pattern=pattern,

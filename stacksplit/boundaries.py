@@ -45,9 +45,11 @@ Strong signs of a CONTINUATION:
 - text continuing mid-sentence or mid-table from the previous page
 - the same running header/footer, case number or report continuing
 - enclosures explicitly announced by the previous page (e.g. "attached: lab results") that carry no own letterhead
+Duplicates: stacks often contain the same document scanned twice. A page that repeats the FIRST page of a
+document already seen is a second copy and therefore starts a new document; never merge copies.
 
 For the first page listed there is no previous page in view: answer true if it looks like the first page of a document.
-confidence is your certainty in the decision from 0.0 to 1.0. reason is a few words, in English.
+First write reason (a few words, in English), then the decision. confidence is your certainty from 0.0 to 1.0.
 """
 
 SCHEMA = {
@@ -57,13 +59,16 @@ SCHEMA = {
             "type": "array",
             "items": {
                 "type": "object",
+                # reason comes before the verdict on purpose: the model writes
+                # fields in order, so it argues first and decides second.
+                # The other way round, reason and verdict sometimes disagreed.
                 "properties": {
                     "page": {"type": "integer"},
+                    "reason": {"type": "string"},
                     "starts_new_document": {"type": "boolean"},
                     "confidence": {"type": "number"},
-                    "reason": {"type": "string"},
                 },
-                "required": ["page", "starts_new_document", "confidence", "reason"],
+                "required": ["page", "reason", "starts_new_document", "confidence"],
                 "additionalProperties": False,
             },
         }
@@ -153,14 +158,14 @@ def _ask_window(backend: ChatBackend, pages: list[Page]) -> dict[int, Decision]:
 
 def _apply_markers(pages: list[Page], decisions: list[Decision]) -> list[Decision]:
     result: list[Decision] = []
-    markers = [page_marker(p) for p in pages]
-    for pos, decision in enumerate(decisions):
-        marker = markers[pos]
-        previous = markers[pos - 1] if pos > 0 else None
+    for page, decision in zip(pages, decisions):
+        marker = page_marker(page)
         if marker and marker[0] == 1 and marker[1] > 1:
             decision = Decision(decision.page_index, True, max(decision.confidence, 0.97), "page marker 1 of n")
-        elif marker and previous and marker[0] > 1 and previous == (marker[0] - 1, marker[1]):
-            decision = Decision(decision.page_index, False, max(decision.confidence, 0.98), "page marker continues")
+        elif marker and marker[0] > 1:
+            # "Page 2 of 5" never opens a document, even when page 1 of 5
+            # carried no marker or OCR missed it.
+            decision = Decision(decision.page_index, False, max(decision.confidence, 0.97), "page marker k of n, k > 1")
         result.append(decision)
     return result
 

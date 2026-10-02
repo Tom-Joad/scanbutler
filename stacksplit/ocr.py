@@ -38,6 +38,8 @@ class Page:
     header: str
     footer: str
     has_images: bool
+    # Measured on the page image (see pdfops.ink_coverage); None if unknown.
+    ink: float | None = None
 
     @property
     def number(self) -> int:
@@ -48,7 +50,11 @@ class Page:
         text = _IMAGE_REF.sub("", "\n".join((self.header, self.markdown, self.footer)))
         return len(_NOISE.sub("", text))
 
-    def is_blank(self, max_chars: int) -> bool:
+    def is_blank(self, max_chars: int, max_ink: float = 0.0) -> bool:
+        # The image decides first: on an empty page OCR models sometimes
+        # invent whole paragraphs, in a language that isn't even there.
+        if self.ink is not None and self.ink < max_ink:
+            return True
         return not self.has_images and self.text_chars() <= max_chars
 
 

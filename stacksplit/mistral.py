@@ -11,6 +11,7 @@ import base64
 import json
 import logging
 import random
+import threading
 import time
 from typing import Any
 
@@ -33,7 +34,8 @@ class MistralClient:
         ocr_model: str,
         llm_model: str,
         timeout: float = 300.0,
-        max_attempts: int = 6,
+        max_attempts: int = 10,
+        max_rps: float = 0.0,
     ) -> None:
         self._http = httpx.Client(
             base_url=api_base,
@@ -43,25 +45,60 @@ class MistralClient:
         self.ocr_model = ocr_model
         self.llm_model = llm_model
         self.max_attempts = max_attempts
+        # Shared by all worker threads: after a 429 nobody sends until the
+        # cooldown is over, instead of each thread hammering the limit alone.
+        self._lock = threading.Lock()
+        self._cooldown_until = 0.0
+        # Account limits are per model and only visible in Mistral's admin
+        # panel, so the request rate is a setting; 0 disables the throttle.
+        self._min_interval = 1.0 / max_rps if max_rps > 0 else 0.0
+        self._next_slot = 0.0
 
     def close(self) -> None:
         self._http.close()
 
+    def _wait_for_cooldown(self) -> None:
+        while True:
+            with self._lock:
+                remaining = self._cooldown_until - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(remaining)
+        if self._min_interval:
+            with self._lock:
+                now = time.monotonic()
+                slot = max(now, self._next_slot)
+                self._next_slot = slot + self._min_interval
+            if slot > now:
+                time.sleep(slot - now)
+
+    def _back_off(self, attempt: int, retry_after: str | None, path: str, reason: object) -> None:
+        delay = min(60.0, 2.0**attempt) + random.uniform(0, 1)
+        if retry_after:
+            try:
+                delay = max(delay, float(retry_after))
+            except ValueError:
+                pass
+        with self._lock:
+            self._cooldown_until = max(self._cooldown_until, time.monotonic() + delay)
+        log.warning("api retry", extra={"path": path, "reason": reason, "attempt": attempt, "delay_s": round(delay, 1)})
+
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
         for attempt in range(1, self.max_attempts + 1):
+            self._wait_for_cooldown()
             try:
                 response = self._http.post(path, json=body)
             except httpx.TransportError as exc:
                 if attempt == self.max_attempts:
                     raise MistralError(f"{path}: transport error: {exc}") from exc
-                self._sleep(attempt, None, path, type(exc).__name__)
+                self._back_off(attempt, None, path, type(exc).__name__)
                 continue
 
             if response.status_code < 400:
                 return response.json()
 
             if response.status_code in _RETRY_STATUS and attempt < self.max_attempts:
-                self._sleep(attempt, response.headers.get("retry-after"), path, response.status_code)
+                self._back_off(attempt, response.headers.get("retry-after"), path, response.status_code)
                 continue
 
             # The error body describes the request problem; it never contains
@@ -69,17 +106,6 @@ class MistralClient:
             raise MistralError(f"{path}: HTTP {response.status_code}: {response.text[:500]}")
 
         raise MistralError(f"{path}: giving up after {self.max_attempts} attempts")
-
-    @staticmethod
-    def _sleep(attempt: int, retry_after: str | None, path: str, reason: object) -> None:
-        delay = min(60.0, 2.0**attempt) + random.uniform(0, 1)
-        if retry_after:
-            try:
-                delay = max(delay, float(retry_after))
-            except ValueError:
-                pass
-        log.warning("api retry", extra={"path": path, "reason": reason, "attempt": attempt, "delay_s": round(delay, 1)})
-        time.sleep(delay)
 
     def ocr_pdf(self, pdf_bytes: bytes) -> list[dict[str, Any]]:
         """OCR one PDF and return its page objects in page order."""

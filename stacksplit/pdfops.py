@@ -8,13 +8,47 @@ import subprocess
 from pathlib import Path
 
 import pikepdf
+import pypdfium2 as pdfium
+from PIL import ImageFilter
 
 log = logging.getLogger(__name__)
+
+# Grey levels a pixel must be below the paper colour to count as ink.
+INK_CONTRAST = 40
 
 
 def page_count(path: Path) -> int:
     with pikepdf.open(path) as pdf:
         return len(pdf.pages)
+
+
+def ink_coverage(path: Path, dpi: int = 50) -> list[float]:
+    """Share of each page's area (0..1) that is visibly darker than the paper.
+
+    The threshold follows the page's own background, so tinted paper and
+    pale forms are measured fairly. A 5% margin is ignored (scanner edges),
+    and a median filter removes dust specks. This is independent of OCR,
+    which matters because OCR models can hallucinate text on blank pages.
+    """
+    doc = pdfium.PdfDocument(str(path))
+    try:
+        result = []
+        for page in doc:
+            image = page.render(scale=dpi / 72, grayscale=True).to_pil().convert("L")
+            width, height = image.size
+            image = image.crop((width // 20, height // 20, width - width // 20, height - height // 20))
+            histogram = image.filter(ImageFilter.MedianFilter(3)).histogram()
+            total = sum(histogram)
+            running, background = 0, 255
+            for value, count in enumerate(histogram):
+                running += count
+                if running * 2 >= total:
+                    background = value
+                    break
+            result.append(sum(histogram[: max(0, background - INK_CONTRAST)]) / total)
+        return result
+    finally:
+        doc.close()
 
 
 def make_searchable(src: Path, dst: Path, languages: str, jobs: int, extra_args: str) -> None:
