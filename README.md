@@ -1,141 +1,232 @@
 # scan-stack-splitter
 
-Drop a scanned stack of paper — hundreds of pages, no separator sheets — into a
-folder and get back one searchable PDF per document, named after its content:
+[![Build and push image](https://github.com/Tom-Joad/scan-stack-splitter/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/Tom-Joad/scan-stack-splitter/actions/workflows/build-and-push.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Turn scanned paper into searchable PDFs, one per document, named after their
+content. It runs as a Docker container that watches two folders.
+
+**Stacks.** Drop a scan of a whole pile of paper, with hundreds of pages and
+no separator sheets. The container finds where each document begins from the
+content alone and splits the scan:
 
 ```
-stacks/inbox/Patient A/stack-01.pdf  (500 pages)
+stacks/inbox/Household/stack-01.pdf  (500 pages)
         ↓
-stacks/output/Patient A/Blutbild 2026-09-30.pdf
-stacks/output/Patient A/Befundbericht CT Thorax 2026-09-30.pdf
-stacks/output/Patient A/Arztbrief Kardiologie 2026-08-14.pdf
+stacks/output/Household/Blood count 2026-09-30.pdf
+stacks/output/Household/CT report chest 2026-09-30.pdf
+stacks/output/Household/Electricity bill 2026-08-14.pdf
 ...
 ```
 
-A second input, `scanner/`, is meant for a document scanner that saves
-straight to a network share. There, each file is one document. It gets the
-same fresh OCR and content-based name, but is never split:
+**Scanner.** Point a document scanner that saves to a network share at the
+second inbox. Each file there is one document. It gets the same OCR and
+naming, but is never split:
 
 ```
 scanner/inbox/20261002_141503.pdf
         ↓
-scanner/output/Rechnung Stadtwerke 2026-09-28.pdf
+scanner/output/Insurance renewal notice 2026-09-28.pdf
 ```
 
-Both inputs have their own `inbox/`, `output/`, `archive/` and `failed/`
-folders and their own worker. A scan is processed right away, even while a
-large stack is still running. Either input can be switched off
-(`STACKS_ENABLED`, `SCANNER_ENABLED`).
+Titles are written in the language of each document unless you set
+`TITLE_LANGUAGE`.
 
-Document boundaries are found from the content alone. It uses
-[Mistral OCR](https://docs.mistral.ai/capabilities/document_ai/basic_ocr/) for
-reading and a Mistral chat model for splitting and naming. The searchable text
-layer comes from a fresh Tesseract pass via [ocrmypdf](https://ocrmypdf.readthedocs.io/).
+Under the hood:
 
-## How it works
+- [Mistral OCR](https://docs.mistral.ai/capabilities/document_ai/basic_ocr/)
+  reads the pages through Mistral's batch API, at half the regular price.
+- A Mistral chat model decides where documents begin and names them.
+- [ocrmypdf](https://ocrmypdf.readthedocs.io/) with Tesseract adds a fresh,
+  invisible text layer, so every output PDF is searchable.
 
-1. **OCR**: The stack is sent to Mistral OCR in chunks of 50 pages through the
-   [batch API](https://docs.mistral.ai/capabilities/batch/). That costs half
-   the regular price, and a job takes minutes instead of seconds. Job ids and
-   each chunk's result are stored as soon as they exist, so an interrupted run
-   never pays for the same page twice. Uploads and results are deleted from
-   Mistral's file storage afterwards. A chunk that fails in the batch is
-   retried directly. `OCR_MODE=direct` skips the batch API.
-2. **Blank pages**: Pages are dropped when their image shows almost no ink,
-   typically duplex back sides. The measurement is on the scan itself, not on
-   the OCR text: OCR models occasionally hallucinate whole paragraphs on an
-   empty page.
-3. **Boundaries** (stacks only): A chat model reads overlapping windows of 12 pages. It decides
-   for each page whether that page starts a new document, using letterheads,
-   salutations, headings, dates, layout changes and text that continues across
-   pages. Each page's verdict comes from the window where it had the most
-   context. Explicit "page *k* of *n*" markers override the model. A second
-   copy of a document is kept as its own file (it shows up as `... (2).pdf`).
-4. **Naming**: Each document gets a short topic title in the document's language
-   (configurable) and the date it is about: the examination or sampling date for
-   reports, otherwise the issue date.
-5. **Text layer**: ocrmypdf replaces any existing text layer (`--force-ocr`).
-   Before recognition it deskews pages, cleans the image Tesseract sees and
-   upsamples it to 300 dpi. The image uses Tesseract's
-   [`tessdata_best`](https://github.com/tesseract-ocr/tessdata_best) models for
-   German and English. This is slower than the defaults but holds up much better
-   on poor scans.
-6. **Output**: The pages of each document are cut from the searchable stack into
-   `<input>/output/<inbox sub-folder>/<title> <date>.pdf`. The PDF title and subject
-   metadata are set too.
+## Contents
 
-The original stack is then moved to `archive/`. A stack that fails is moved to
-`failed/` together with an `.error.txt`. To retry, move it back into the inbox:
-cached OCR is reused.
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Reviewing and correcting splits](#reviewing-and-correcting-splits)
+- [Configuration](#configuration)
+- [Queue webhook (Home Assistant)](#queue-webhook-home-assistant)
+- [Spending limit and paused processing](#spending-limit-and-paused-processing)
+- [Rate limits and cost](#rate-limits-and-cost)
+- [Privacy](#privacy)
+- [Unraid](#unraid)
+- [Development](#development)
 
-## Reviewing and correcting splits
+## Quick start
 
-Without separator sheets, splitting cannot be perfect. Every stack gets a work
-directory, `work/<input>/<sub-folder>/<stack name>-<hash>/`, containing:
-
-- `review.md`: every document with its page range and confidence. Documents
-  are flagged ⚠ when they start in the middle ("page 3 of 5"), consist of a
-  single nearly empty page, or the model was unsure.
-- `decisions.json`: the model's verdict and reason for every page.
-- `plan.json`: the split plan, meant to be edited by hand. Page numbers are
-  1-based ranges such as `"4-6, 9"`.
-
-To fix a split, edit `plan.json`. Change `pages`, merge entries or split them.
-Set `title` to `""` to have the title and date generated again. Then run:
+You need Docker and a [Mistral API key](https://console.mistral.ai/).
 
 ```bash
-docker compose exec scan-stack-splitter stacksplit rebuild "stacks/Patient A/stack-01-1a2b3c4d"
-```
-
-The files listed in `written_files` are replaced. Nothing is OCR'd again.
-
-## Setup
-
-```bash
-cp .env.example .env    # set MISTRAL_API_KEY, DATA_PATH, PUID/PGID
+git clone https://github.com/Tom-Joad/scan-stack-splitter.git
+cd scan-stack-splitter
+cp .env.example .env        # set MISTRAL_API_KEY, and DATA_PATH, PUID, PGID if needed
 docker compose up -d --build
 docker compose logs -f
 ```
 
-Then put PDFs into `DATA_PATH/stacks/inbox/` or `DATA_PATH/scanner/inbox/`,
-optionally in sub-folders. A file is
-picked up once it has not changed for `STABLE_SECONDS`, so copying a large
-scan over the network is safe.
+The prebuilt image `ghcr.io/tom-joad/scan-stack-splitter` can replace the
+local build, see `docker-compose.yml`.
 
-On Unraid, use the template in [`unraid/`](unraid/README-UNRAID.md) instead.
+On first start, the container creates this layout under `DATA_PATH`:
 
-One-off processing without the watcher:
-
-```bash
-docker compose run --rm scan-stack-splitter process /data/some.pdf --folder "Patient A" --profile stacks
+```
+stacks/   inbox/  output/  archive/  failed/
+scanner/  inbox/  output/  archive/  failed/
+work/
 ```
 
-All settings are environment variables. See [`.env.example`](.env.example).
-The ones you are most likely to change:
+Put PDFs into `stacks/inbox/` or `scanner/inbox/`, optionally in
+sub-folders. Sub-folders are mirrored in `output/`. A file is picked up once
+it has not changed for `STABLE_SECONDS` (60 s by default), so copying a large
+scan over the network is safe.
+
+To process a single file once, without the watcher:
+
+```bash
+docker compose run --rm scan-stack-splitter process /data/some.pdf --profile stacks --folder "Household"
+```
+
+## How it works
+
+1. **OCR.** Pages go to Mistral OCR in chunks of 50 through the
+   [batch API](https://docs.mistral.ai/capabilities/batch/). A job takes
+   minutes instead of seconds and costs half as much. Job ids and results are
+   stored as soon as they exist, so an interrupted run never pays for a page
+   twice. Uploads and results are deleted from Mistral's file storage
+   afterwards. A chunk that fails inside a batch is retried directly.
+   `OCR_MODE=direct` skips the batch API.
+2. **Blank pages.** A page is dropped when its image shows almost no ink,
+   typically the back of a duplex scan. The check uses the image itself, not
+   the OCR text, because OCR models sometimes invent whole paragraphs on an
+   empty page.
+3. **Boundaries** (stacks only). A chat model reads overlapping windows of 12
+   pages and decides, page by page, whether a new document starts. It looks at
+   letterheads, salutations, headings, dates, layout changes and sentences
+   that run across pages. Each page's verdict comes from the window where it
+   had the most context on both sides. Explicit "page *k* of *n*" markers
+   override the model. A second copy of a document becomes a file of its own,
+   for example `... (2).pdf`.
+4. **Naming.** Each document gets a short title of 1 to 6 words, naming its
+   type and the detail that sets it apart, plus the date it is about. For
+   reports and lab results, that is the examination or sampling date. For
+   letters, it is the issue date.
+5. **Text layer.** ocrmypdf replaces any existing text layer (`--force-ocr`).
+   It deskews the pages, cleans the image Tesseract reads and upsamples poor
+   scans to 300 dpi. The image ships Tesseract's
+   [`tessdata_best`](https://github.com/tesseract-ocr/tessdata_best) models
+   for German and English. They are slower than the defaults, but hold up much
+   better on poor scans.
+6. **Output.** Each document's pages are cut from the searchable scan into
+   `<input>/output/<sub-folder>/<title> <date>.pdf`. The PDF's title and
+   subject metadata are set as well.
+
+The original file then moves to `archive/`. A file that fails moves to
+`failed/` together with an `.error.txt`. Move it back into `inbox/` to retry:
+OCR that was already paid for is reused.
+
+To check that a PDF really has a text layer, open it and search for a word
+with Ctrl+F, or select the text. In the document's font list, the invisible
+layer shows up as `GlyphLessFont`.
+
+## Reviewing and correcting splits
+
+Without separator sheets, splitting cannot be perfect. Every input file gets
+a work directory, `work/<input>/<sub-folder>/<file name>-<hash>/`. It holds:
+
+- `review.md`: every document with its page range. A document is flagged ⚠
+  when it starts mid-document (for example on "page 3 of 5"), when it is a
+  single, nearly empty page, or when the model was unsure.
+- `decisions.json`: the model's verdict and reason for every page.
+- `plan.json`: the split plan, meant to be edited by hand. Page numbers are
+  1-based ranges such as `"4-6, 9"`.
+
+To fix a split, edit `plan.json`: change `pages`, or merge and split entries.
+Set `title` to `""` to have the title and date generated again. Then run:
+
+```bash
+docker compose exec scan-stack-splitter stacksplit rebuild "stacks/Household/stack-01-1a2b3c4d"
+```
+
+The files listed in `written_files` are replaced. Nothing is OCR'd again.
+
+## Configuration
+
+All settings are environment variables. [`.env.example`](.env.example) lists
+them with comments.
+
+**Mistral**
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `MISTRAL_API_KEY` | — | Required |
 | `MISTRAL_LLM_MODEL` | `mistral-large-latest` | Model for splitting and naming |
-| `MISTRAL_MAX_RPS` | `1` | Requests per second; set to your account's limit |
-| `OCR_MODE` | `batch` | `batch` (half price) or `direct` (immediate) |
-| `STACKS_DIR` / `SCANNER_DIR` | `/data/stacks`, `/data/scanner` | Root of each input |
+| `MISTRAL_OCR_MODEL` | `mistral-ocr-latest` | OCR model |
+| `MISTRAL_MAX_RPS` | `1` | Requests per second across all workers; set it below your account's limit |
+| `OCR_MODE` | `batch` | `batch` (half price, minutes) or `direct` (full price, seconds) |
+| `BATCH_POLL_SECONDS` | `15` | How often a running batch job is checked |
+| `BATCH_MAX_WAIT_HOURS` | `24` | A job still running after this is cancelled; its chunks are retried directly |
+| `PAUSE_RETRY_MINUTES` | `30` | Probe interval while paused, see [Spending limit](#spending-limit-and-paused-processing) |
+| `MISTRAL_API_BASE` | `https://api.mistral.ai/v1` | API endpoint |
+| `MISTRAL_TIMEOUT` | `300` | Seconds per request |
+
+**Folders and inputs**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DATA_DIR` | `/data` | Parent of the default folders below |
+| `STACKS_DIR` / `SCANNER_DIR` | `$DATA_DIR/stacks`, `$DATA_DIR/scanner` | Root of each input; `inbox/`, `output/`, `archive/` and `failed/` live below it |
 | `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
-| `QUEUE_WEBHOOK_URL` | — | Report queue counts here, see below |
-| `PAUSE_RETRY_MINUTES` | `30` | Probe interval while paused by a spending limit |
-| `TITLE_LANGUAGE` | language of the document | e.g. `German` |
-| `FILENAME_PATTERN` | `{title} {date}` | `{date}` is `YYYY-MM-DD` |
-| `NO_DATE_LABEL` | `undated` | Used when no date is found |
-| `REVIEW_CONFIDENCE` | `0.75` | Below this, a split is flagged |
-| `OCRMYPDF_LANGUAGES` | `deu+eng` | Only `deu`, `eng` ship as best models |
+| `WORK_DIR` | `$DATA_DIR/work` | OCR results, plans and review files |
+| `TMPDIR` | `/tmp` | Temporary page images; point it at a disk for large stacks |
+| `POLL_INTERVAL` | `30` | Seconds between inbox checks |
+| `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up |
+
+**Naming**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `TITLE_LANGUAGE` | each document's language | For example `English` or `German` |
+| `FILENAME_PATTERN` | `{title} {date}` | `{title}` is required; `{date}` is `YYYY-MM-DD` |
+| `NO_DATE_LABEL` | `undated` | Replaces `{date}` when no date is found |
+
+**Splitting and blank pages**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `BOUNDARY_WINDOW` / `BOUNDARY_STEP` | `12` / `6` | Pages per model request, and how far each window moves on |
+| `REVIEW_CONFIDENCE` | `0.75` | Below this model confidence, a document is flagged |
+| `DROP_BLANK_PAGES` | `true` | `false` keeps blank pages with the document before them |
+| `BLANK_MAX_INK_PERCENT` | `0.2` | Pages with less visible ink than this are blank |
+| `BLANK_MAX_CHARS` | `15` | Pages with no image and at most this much text are blank |
+| `METADATA_MAX_CHARS` | `24000` | Text per document sent for naming; longer documents are shortened in the middle |
+
+**Text layer**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OCRMYPDF_ENABLED` | `true` | `false` keeps the scan's own text layer, if any |
+| `OCRMYPDF_LANGUAGES` | `deu+eng` | Tesseract languages; only `deu` and `eng` ship as best models |
+| `OCRMYPDF_JOBS` | number of CPUs | Parallel Tesseract jobs |
 | `OCRMYPDF_EXTRA_ARGS` | — | Appended to the ocrmypdf call |
 
-## Queue webhook (e.g. Home Assistant)
+**Throughput, webhook and logging**
 
-Set `QUEUE_WEBHOOK_URL` and the container POSTs the queue state as JSON. It
-sends a report whenever a count changes and repeats it every
-`QUEUE_WEBHOOK_HEARTBEAT_SECONDS` (default 300), so the receiver catches up
-after a restart. The payload holds counts only, never file names:
+| Variable | Default | Purpose |
+|---|---|---|
+| `OCR_CHUNK_PAGES` | `50` | Pages per OCR request |
+| `OCR_CONCURRENCY` / `LLM_CONCURRENCY` | `3` / `4` | Parallel requests; `MISTRAL_MAX_RPS` still applies |
+| `QUEUE_WEBHOOK_URL` | — | Report queue counts here, see [below](#queue-webhook-home-assistant) |
+| `QUEUE_WEBHOOK_CHECK_SECONDS` | `10` | How often the queue is counted |
+| `QUEUE_WEBHOOK_HEARTBEAT_SECONDS` | `300` | Resend interval without changes |
+| `LOG_LEVEL` | `INFO` | Logs are JSON lines on stdout |
+
+## Queue webhook (Home Assistant)
+
+With `QUEUE_WEBHOOK_URL` set, the container POSTs the queue state as JSON.
+It sends whenever a number changes, and again every
+`QUEUE_WEBHOOK_HEARTBEAT_SECONDS`, so the receiver catches up after a
+restart. The payload holds counts only, never file names:
 
 ```json
 {
@@ -148,16 +239,19 @@ after a restart. The payload holds counts only, never file names:
 }
 ```
 
-`queued` is `waiting + processing`. `failed` counts the PDFs in the `failed/`
-folders. `paused`, `pause_reason` and `paused_since` are always present. The
-last two are `null` unless processing is paused, see
-[Spending limit](#spending-limit-and-paused-processing). If the receiver is unreachable, a warning is logged and processing
-carries on. Every send and every failure (with the error, but never the URL) appears in
-the container log; a repeated, unchanged error is logged once per heartbeat
-interval.
+- `queued` is `waiting + processing`.
+- `failed` counts the PDFs in the `failed/` folders.
+- `paused`, `pause_reason` and `paused_since` are always present. The last
+  two are `null` unless processing is paused. `pause_reason` is Mistral's
+  raw error text, up to 300 characters. `paused_since` is an ISO 8601
+  timestamp in UTC.
 
-For Home Assistant, add a trigger-based template sensor. Use a long random
-`webhook_id`: anyone who knows it can post to the webhook.
+Every send and every failure appears in the container log, with the error
+text but never the URL. An unchanged error is repeated at most once per
+heartbeat interval. If the receiver is unreachable, processing carries on.
+
+For Home Assistant, a trigger-based template entity reads the webhook. Pick a
+long random `webhook_id`, because anyone who knows it can post to it:
 
 ```yaml
 template:
@@ -194,50 +288,64 @@ Then set
 
 ## Spending limit and paused processing
 
-When Mistral refuses the account, processing pauses instead of moving file
-after file to `failed/`. That happens with a reached spending limit, an
-exhausted quota or a rejected API key. What counts as a refusal: HTTP 401, 402
-or 403, or a 429 that is not the ordinary per-second rate limit. Mistral does
-not document how a reached spending limit is answered, so this errs on the
-side of pausing.
+Mistral can refuse an account, for example because its spending limit is
+reached, its quota is used up or its API key is rejected. In that case,
+processing pauses instead of moving file after file to `failed/`.
+
+A refusal is an HTTP 401, 402 or 403, or a 429 that is not the ordinary
+per-second rate limit. Mistral does not document how a reached spending
+limit is answered, so this errs on the side of pausing.
 
 While paused:
 
 - Files stay in their inboxes, including the one that hit the limit.
-- The log shows `processing paused` with Mistral's error text. The webhook
-  reports `"paused": true` with `pause_reason` and `paused_since`.
-- Every `PAUSE_RETRY_MINUTES` (default 30), one file is tried as a probe. If
-  it goes through, for example after you raised the limit or a new month
-  started, processing resumes on its own and the log shows
-  `processing resumed`.
+- The log shows `processing paused` with Mistral's error text, and the
+  webhook reports `"paused": true`.
+- Every `PAUSE_RETRY_MINUTES`, one file is tried as a probe. Once it goes
+  through, processing resumes on its own and the log shows
+  `processing resumed`. That happens, for example, after you raise the limit
+  or a new billing month starts.
 
-## Rate limits
+## Rate limits and cost
 
-Mistral limits requests per second and tokens per minute, per model and per
-account tier. The values are not published. Look them up in Mistral's admin
-panel under **API › Limits** and set `MISTRAL_MAX_RPS` slightly below the
-requests-per-second limit of your `MISTRAL_LLM_MODEL`. Should a request still
-hit the limit, all workers pause together and retry.
+Mistral limits requests per second and tokens per minute. The limits depend
+on the model and the account tier, and they are not published. Look yours up
+in Mistral's console under **API › Limits** and set `MISTRAL_MAX_RPS` a
+little below the requests-per-second limit of your `MISTRAL_LLM_MODEL`. If a
+request still runs into the limit, all workers pause together and retry.
 
-The number of requests depends on the content of the stack. Splitting takes
-one request per 6 pages. Naming takes one request per document found. A
-500-page stack with around 200 documents therefore needs about 280 requests,
-which is roughly 20 minutes at 0.25 requests per second. Every answer is
-cached in the work directory, so an interrupted run resumes without asking
-again.
+Splitting needs one request per 6 pages, and naming one request per document.
+A 500-page stack holding about 200 documents takes roughly 280 requests,
+which is about 20 minutes at 0.25 requests per second. A scanner file needs
+a single request. Every answer is cached in the work directory.
+
+At the prices published in October 2026, a 500-page stack costs about
+US$1.60: about $1.00 for batch OCR and about $0.60 for the chat model.
+Check [Mistral's pricing](https://docs.mistral.ai/inference/pricing) for
+current figures.
 
 ## Privacy
 
-Every page is sent to Mistral's API: OCR, then splitting and naming. Only use
-this for documents you are entitled to process that way. If the documents
-belong to someone else, get their consent first. That matters especially for
-health data.
+Every page is sent to Mistral's API, first for OCR, then for splitting and
+naming. Only use this for documents you are entitled to process that way. If
+the documents belong to someone else, get their consent first, especially for
+health or financial records.
 
-The work directories hold the full OCR text of every stack. Delete them once
-you are happy with the result. Logs contain file names, page numbers and
-counts, but never document text.
+- The work directories hold the full OCR text of every input file. There is
+  no automatic cleanup, so delete a file's work directory once its documents
+  are fine.
+- Logs contain file names, page numbers and counts, never document text.
+- The queue webhook sends counts only.
+
+## Unraid
+
+A Docker template and step-by-step instructions are in
+[`unraid/`](unraid/README-UNRAID.md).
 
 ## Development
+
+There is no local Python setup to maintain: the image contains everything,
+and the tests run inside it.
 
 ```bash
 docker build -t scan-stack-splitter:dev .
@@ -245,8 +353,23 @@ docker run --rm --user root --entrypoint sh -v "$PWD:/src" -w /src scan-stack-sp
   -c "pip install -q pytest && python -m pytest -q"
 ```
 
-The tests replace Mistral with a fake and need no API key.
+The tests replace Mistral with a fake and need no API key. CI runs them
+together with `pip-audit` and `gitleaks` on every push. Images are built only
+for version tags (`v*`), for `linux/amd64` and `linux/arm64`. Each image is
+signed with cosign and ships an SBOM and provenance.
+
+See [CHANGELOG.md](CHANGELOG.md) for the release history and
+[SECURITY.md](SECURITY.md) for reporting vulnerabilities.
+
+## Disclaimer
+
+This is an independent project, not affiliated with or endorsed by Mistral
+AI or any scanner manufacturer. Product names belong to their owners.
+
+Splitting and naming are automated and can be wrong. Check `review.md` and
+the results before relying on them, for example before discarding paper
+originals. The software comes without warranty; see the [license](LICENSE).
 
 ## License
 
-MIT
+[MIT](LICENSE)

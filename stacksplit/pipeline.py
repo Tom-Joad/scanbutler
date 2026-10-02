@@ -203,6 +203,9 @@ def write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
     output = settings.profile(plan.profile).output
     out_dir = output / plan.folder
     out_root = output.resolve()
+    # plan.json is edited by hand; never let its folder point outside the output tree.
+    if not out_dir.resolve().is_relative_to(out_root):
+        raise ValueError(f"plan folder {plan.folder!r} points outside {output}")
 
     # Validate everything before touching a single file.
     page_lists = [parse_pages(doc.pages, plan.page_count) for doc in plan.documents]

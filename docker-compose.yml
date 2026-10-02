@@ -14,7 +14,7 @@ services:
       - .env
 
     volumes:
-      # Contains inbox/, output/, work/, archive/ and failed/.
+      # Holds stacks/, scanner/ and work/ (see README > Quick start).
       - ${DATA_PATH:-./data}:/data
 
     read_only: true

@@ -15,6 +15,8 @@ log = logging.getLogger(__name__)
 
 _IMAGE_REF = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 
+# The title examples deliberately mix German and English: they show the model
+# that titles follow {language}, not the language of this prompt.
 SYSTEM_PROMPT = """\
 You name scanned documents for a personal archive. You receive the OCR text of ONE document.
 Return:

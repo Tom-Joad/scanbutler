@@ -1,79 +1,95 @@
 # Running scan-stack-splitter on Unraid
 
-The container runs permanently and watches its inbox. It has no web interface.
-Everything it does is visible in the container log.
+The container runs permanently and watches two inboxes. It has no web
+interface; everything it does shows up in the container log.
 
 ## Install
 
-1. **Registry login**: only needed while the GHCR image is private, and only
-   once. In an Unraid terminal, run `docker login ghcr.io` with your GitHub
-   username and a personal access token that has the `read:packages` scope.
-
-2. **Add the template**: copy `scan-stack-splitter.xml` to
-   `/boot/config/plugins/dockerMan/templates-user/` on the flash share. Then,
+1. **Add the template.** Copy `scan-stack-splitter.xml` to
+   `/boot/config/plugins/dockerMan/templates-user/` on the flash drive. Then,
    in the Unraid web UI, go to **Docker → Add Container** and pick
    `scan-stack-splitter` from the template dropdown.
 
-3. **Fill in the settings**:
+2. **Fill in the settings.**
 
    | Setting | Value |
    |---|---|
-   | Stacks | e.g. `/mnt/user/<share>/Scan-Splitter/stacks` |
-   | Scanner | e.g. `/mnt/user/<share>/Scan-Splitter/scanner` |
+   | Stacks | e.g. `/mnt/user/<share>/scan-splitter/stacks` |
+   | Scanner | e.g. `/mnt/user/<share>/scan-splitter/scanner` |
    | Work | `/mnt/user/appdata/scan-stack-splitter` |
    | `MISTRAL_API_KEY` | your key (masked in the UI) |
-   | `MISTRAL_LLM_MODEL` | e.g. `mistral-large-latest` or a pinned version |
-   | `MISTRAL_MAX_RPS` | slightly below your account's requests-per-second limit for that model |
-   | `TITLE_LANGUAGE` | e.g. `German` |
-   | `NO_DATE_LABEL` | e.g. `undatiert` |
+   | `MISTRAL_LLM_MODEL` | `mistral-large-latest`, or a pinned version such as `mistral-large-2512` |
+   | `MISTRAL_MAX_RPS` | a little below your account's requests-per-second limit for that model |
+   | `TITLE_LANGUAGE` | e.g. `English`; leave empty to use each document's language |
+   | `NO_DATE_LABEL` | the word used when a document has no date, e.g. `undated` |
    | `OCRMYPDF_JOBS` | leave some cores for the rest of the server |
-   | `QUEUE_WEBHOOK_URL` | optional, e.g. a Home Assistant webhook, see the main README |
+   | `QUEUE_WEBHOOK_URL` | optional, e.g. a Home Assistant webhook; see the [main README](../README.md#queue-webhook-home-assistant) |
 
-4. **Apply**. On first start, the container creates `inbox/`, `output/`,
-   `archive/` and `failed/` under both Stacks and Scanner.
+   The advanced view has the remaining settings. Leave `WORK_DIR` and
+   `TMPDIR` as they are.
+
+3. **Apply.** On first start, the container creates `inbox/`, `output/`,
+   `archive/` and `failed/` under both Stacks and Scanner. The log shows
+   `watching inbox` once for each.
+
+If you run a private build of the image, Unraid needs a one-time
+`docker login ghcr.io` before the first pull. Log in with a personal access
+token that has the `read:packages` scope.
 
 ## Use
 
 ### Stacks
 
-- Copy a scanned stack into `stacks/inbox/` or a sub-folder of it, for example
-  `stacks/inbox/Person A/stack-01.pdf`. The file is picked up once it has
-  stopped growing for 60 seconds, so copying over SMB is safe.
-- The documents appear in `stacks/output/Person A/`. The original stack moves
-  to `stacks/archive/Person A/`.
-- Each stack has its own folder under Work: `stacks/Person A/stack-01-<hash>/`.
+- Copy a scanned stack into `stacks/inbox/`, or into a sub-folder such as
+  `stacks/inbox/Household/stack-01.pdf`. It is picked up once it has stopped
+  growing for 60 seconds, so copying over SMB is safe.
+- The documents appear in `stacks/output/Household/`. The original moves to
+  `stacks/archive/Household/`.
+- Each stack gets a folder under Work, `stacks/Household/stack-01-<hash>/`.
   Its `review.md` lists every document and flags uncertain splits.
 - To correct a split, edit `plan.json` in that folder, then run:
 
   ```bash
-  docker exec scan-stack-splitter stacksplit rebuild "stacks/Person A/stack-01-<hash>"
+  docker exec scan-stack-splitter stacksplit rebuild "stacks/Household/stack-01-<hash>"
   ```
 
 ### Scanner
 
-- Set the scanner to save **PDF** to a network folder: the SMB share path of
-  `scanner/inbox/`. Its own text recognition can stay off, because every file
-  gets a fresh OCR pass here anyway.
-- Each file becomes one document in `scanner/output/`, named by content. It is
-  never split. Blank pages are dropped. The original moves to
+- Set the scanner to save **PDF** files to a network folder, and point it at
+  the SMB path of `scanner/inbox/`. The scanner's own text recognition can stay
+  off, because every file gets a fresh OCR pass here.
+- Each file becomes one document in `scanner/output/`, named by its content.
+  It is never split, but blank pages are dropped. The original moves to
   `scanner/archive/`.
 - The SMB user the scanner logs in with needs write access to
-  `scanner/inbox/`. The container itself reads and moves the files as
+  `scanner/inbox/`. The container reads and moves the files as
   `nobody:users`.
 
-### Failures
+### Failures and pauses
 
-If a file fails, it lands in that input's `failed/` folder next to an
-`.error.txt`. Move it back into `inbox/` to retry: the OCR already paid for is
-reused.
+- If a file fails, it moves to the `failed/` folder of its input, next to an
+  `.error.txt`. Move it back into `inbox/` to retry; OCR that was already
+  paid for is reused.
+- If Mistral refuses the account, processing pauses. This happens, for
+  example, when the spending limit is reached or the key is rejected. The
+  files stay in the inbox, and one file is retried every 30 minutes. See the
+  [main README](../README.md#spending-limit-and-paused-processing).
+
+## Updating
+
+New versions are published as `ghcr.io/tom-joad/scan-stack-splitter:latest`.
+**Check for Updates** on the Docker page pulls them. A container you created
+earlier keeps its settings, so settings added to the template later do not
+appear on their own. Add them with **Add another Path, Port, Variable**; the
+[changelog](../CHANGELOG.md) names new settings.
 
 ## Notes
 
-- The container runs as `nobody:users` (99:100), like Unraid's own shares, so
+- The container runs as `nobody:users` (99:100), like Unraid's shares, so
   output files can be edited and deleted over SMB.
-- Temporary page images go to `Work/tmp` on disk, not to RAM. A 500-page stack
-  needs a few GB there while it is processed.
-- The Work folder holds the full OCR text of every stack. It has no automatic
-  cleanup. Delete a stack's folder once its documents are fine.
+- Temporary page images go to `Work/tmp` on disk, not to RAM. A 500-page
+  stack needs a few GB there while it is processed.
+- The Work folder holds the full OCR text of every file and is never cleaned
+  up automatically. Delete a file's folder there once its documents are fine.
 - Pages are sent to Mistral's API. Uploaded batch files are deleted from
   Mistral's storage after each job.

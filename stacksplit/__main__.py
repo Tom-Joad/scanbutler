@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path, PurePosixPath
 
-from . import logging_setup
+from . import __version__, logging_setup
 from .config import ConfigError, Settings
 from .mistral import MistralClient
 from .pipeline import process_stack, rebuild
@@ -30,6 +30,7 @@ def _client(settings: Settings) -> MistralClient:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="stacksplit", description="Split scanned PDF stacks into named, searchable documents.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("run", help="watch the inboxes of all enabled profiles (default)")
     one = sub.add_parser("process", help="process a single PDF without moving it")
@@ -47,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 2
     logging_setup.configure(settings.log_level)
+    log.info("starting", extra={"version": __version__, "command": command})
 
     # ocrmypdf renders every page into the temp dir. TMPDIR may point into a
     # mounted volume (to keep gigabytes of page images off RAM-backed /tmp),

@@ -5,6 +5,7 @@ import threading
 from pathlib import PurePosixPath
 
 import pikepdf
+import pytest
 
 from stacksplit.pipeline import PLAN, REVIEW, process_stack, rebuild
 from stacksplit.watcher import InboxWatcher
@@ -104,6 +105,21 @@ def test_rebuild_from_edited_plan_retitles_cleared_entries(settings, tmp_path):
     assert titles(stacks.output.glob("*.pdf")) == titles(written)
     with pikepdf.open(stacks.output / "Befundbericht CT undated.pdf") as pdf:
         assert len(pdf.pages) == 3
+
+
+def test_rebuild_refuses_a_plan_folder_outside_the_output(settings, tmp_path):
+    stacks = settings.profile("stacks")
+    src = tmp_path / "stack.pdf"
+    make_pdf(src, len(STACK))
+    work = process_stack(src, PurePosixPath(""), settings, FakeBackend(STACK), stacks)
+
+    plan = json.loads((work / PLAN).read_text(encoding="utf-8"))
+    plan["folder"] = "../../escaped"
+    (work / PLAN).write_text(json.dumps(plan), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside"):
+        rebuild(work, settings, None)
+    assert not (stacks.root.parent / "escaped").exists()
 
 
 def test_watcher_archives_success_and_quarantines_failure(settings):
