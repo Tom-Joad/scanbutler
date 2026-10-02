@@ -4,7 +4,7 @@ import json
 
 import httpx
 
-from stacksplit.notify import QueueReporter
+from stacksplit.notify import QueueReporter, describe_error
 
 
 def make(settings, responder):
@@ -58,3 +58,27 @@ def test_unreachable_receiver_is_retried_and_never_raises(settings):
     assert not reporter.report_if_due(client, now=0)
     assert not reporter.report_if_due(client, now=1)
     assert len(sent) == 2  # a failed report counts as not sent, so it is tried again
+
+
+def test_log_shows_sends_and_errors_without_leaking_the_webhook_id(settings, caplog):
+    responses = iter([httpx.Response(404, text="Not Found"), httpx.Response(404, text="Not Found"), httpx.Response(200)])
+    reporter, client, _ = make(settings, lambda: next(responses))
+    caplog.set_level("INFO", logger="stacksplit.notify")
+
+    reporter.report_if_due(client, now=0)
+    reporter.report_if_due(client, now=1)  # same error again: not repeated in the log
+    reporter.report_if_due(client, now=2)
+
+    events = [(r.getMessage(), getattr(r, "error", None), getattr(r, "reason", None)) for r in caplog.records]
+    assert events == [
+        ("queue webhook failed", "HTTP 404 Not Found: Not Found", None),
+        ("queue webhook reachable again", None, None),
+        ("queue webhook sent", None, "change"),
+    ]
+    assert "api/webhook/queue" not in caplog.text
+
+
+def test_connection_errors_are_described_without_url():
+    request = httpx.Request("POST", "http://ha.test/api/webhook/secret-id")
+    text = describe_error(httpx.ConnectError(f"cannot reach {request.url}", request=request))
+    assert text == "ConnectError: cannot reach <webhook url>"

@@ -148,7 +148,9 @@ after a restart. The payload holds counts only, never file names:
 
 `queued` is `waiting + processing`. `failed` counts the PDFs in the `failed/`
 folders. If the receiver is unreachable, a warning is logged and processing
-carries on.
+carries on. Every send and every failure (with the error, but never the URL) appears in
+the container log; a repeated, unchanged error is logged once per heartbeat
+interval.
 
 For Home Assistant, add a trigger-based template sensor. Use a long random
 `webhook_id`: anyone who knows it can post to the webhook.

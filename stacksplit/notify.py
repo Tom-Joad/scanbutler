@@ -36,6 +36,24 @@ def count_pdfs(directory) -> int:
         return 0
 
 
+def describe_error(exc: httpx.HTTPError) -> str:
+    """A log-safe error text.
+
+    httpx puts the full URL into its messages; for a Home Assistant webhook
+    the id in that URL is the only secret, so it must not reach the log.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        body = " ".join(response.text.split())[:200]
+        return f"HTTP {response.status_code} {response.reason_phrase}" + (f": {body}" if body else "")
+    message = str(exc)
+    try:
+        message = message.replace(str(exc.request.url), "<webhook url>")
+    except RuntimeError:  # httpx raises when no request is attached
+        pass
+    return f"{type(exc).__name__}: {message}"[:300] if message else type(exc).__name__
+
+
 @dataclass
 class QueueReporter:
     url: str
@@ -47,6 +65,8 @@ class QueueReporter:
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _last_sent: dict | None = None
     _last_time: float = 0.0
+    _last_error: str | None = None
+    _last_error_time: float = 0.0
 
     def set_processing(self, profile: str, busy: bool) -> None:
         with self._lock:
@@ -70,17 +90,35 @@ class QueueReporter:
 
     def report_if_due(self, client: httpx.Client, now: float) -> bool:
         state = self.snapshot()
-        if state == self._last_sent and now - self._last_time < self.heartbeat_seconds:
+        changed = state != self._last_sent
+        if not changed and now - self._last_time < self.heartbeat_seconds:
             return False
         try:
             response = client.post(self.url, json=state, timeout=self.timeout)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             # Never let the receiver being down affect processing; try again next check.
-            log.warning("queue webhook failed", extra={"error": str(exc)[:200]})
+            error = describe_error(exc)
+            # Retries run every few seconds; repeat an unchanged error only once
+            # per heartbeat interval so an outage doesn't flood the log.
+            if error != self._last_error or now - self._last_error_time >= self.heartbeat_seconds:
+                log.warning("queue webhook failed", extra={"error": error, "queued": state["queued"]})
+                self._last_error, self._last_error_time = error, now
             return False
-        if state != self._last_sent:
-            log.info("queue reported", extra={"queued": state["queued"], "failed": state["failed"]})
+        if self._last_error:
+            log.info("queue webhook reachable again")
+            self._last_error = None
+        log.info(
+            "queue webhook sent",
+            extra={
+                "reason": "change" if changed else "heartbeat",
+                "status": response.status_code,
+                "queued": state["queued"],
+                "waiting": state["waiting"],
+                "processing": state["processing"],
+                "failed": state["failed"],
+            },
+        )
         self._last_sent, self._last_time = state, now
         return True
 
