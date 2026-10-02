@@ -27,6 +27,7 @@ Everything it does is visible in the container log.
    | `TITLE_LANGUAGE` | e.g. `German` |
    | `NO_DATE_LABEL` | e.g. `undatiert` |
    | `OCRMYPDF_JOBS` | leave some cores for the rest of the server |
+   | `QUEUE_WEBHOOK_URL` | optional, e.g. a Home Assistant webhook, see the main README |
 
 4. **Apply**. On first start, the container creates `inbox/`, `output/`,
    `archive/` and `failed/` under both Stacks and Scanner.

@@ -121,12 +121,63 @@ The ones you are most likely to change:
 | `OCR_MODE` | `batch` | `batch` (half price) or `direct` (immediate) |
 | `STACKS_DIR` / `SCANNER_DIR` | `/data/stacks`, `/data/scanner` | Root of each input |
 | `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
+| `QUEUE_WEBHOOK_URL` | — | Report queue counts here, see below |
 | `TITLE_LANGUAGE` | language of the document | e.g. `German` |
 | `FILENAME_PATTERN` | `{title} {date}` | `{date}` is `YYYY-MM-DD` |
 | `NO_DATE_LABEL` | `undated` | Used when no date is found |
 | `REVIEW_CONFIDENCE` | `0.75` | Below this, a split is flagged |
 | `OCRMYPDF_LANGUAGES` | `deu+eng` | Only `deu`, `eng` ship as best models |
 | `OCRMYPDF_EXTRA_ARGS` | — | Appended to the ocrmypdf call |
+
+## Queue webhook (e.g. Home Assistant)
+
+Set `QUEUE_WEBHOOK_URL` and the container POSTs the queue state as JSON. It
+sends a report whenever a count changes and repeats it every
+`QUEUE_WEBHOOK_HEARTBEAT_SECONDS` (default 300), so the receiver catches up
+after a restart. The payload holds counts only, never file names:
+
+```json
+{
+  "queued": 3, "waiting": 2, "processing": 1, "failed": 0,
+  "profiles": {
+    "stacks":  {"waiting": 1, "processing": 1, "failed": 0},
+    "scanner": {"waiting": 1, "processing": 0, "failed": 0}
+  }
+}
+```
+
+`queued` is `waiting + processing`. `failed` counts the PDFs in the `failed/`
+folders. If the receiver is unreachable, a warning is logged and processing
+carries on.
+
+For Home Assistant, add a trigger-based template sensor. Use a long random
+`webhook_id`: anyone who knows it can post to the webhook.
+
+```yaml
+template:
+  - triggers:
+      - trigger: webhook
+        webhook_id: scan-splitter-queue-CHANGE-ME
+        allowed_methods: [POST]
+        local_only: true
+    sensor:
+      - name: Scan-Splitter queue
+        unique_id: scan_splitter_queue
+        state: "{{ trigger.json.queued }}"
+        unit_of_measurement: files
+        attributes:
+          waiting: "{{ trigger.json.waiting }}"
+          processing: "{{ trigger.json.processing }}"
+          stacks_waiting: "{{ trigger.json.profiles.stacks.waiting | default(0) }}"
+          scanner_waiting: "{{ trigger.json.profiles.scanner.waiting | default(0) }}"
+      - name: Scan-Splitter failed
+        unique_id: scan_splitter_failed
+        state: "{{ trigger.json.failed }}"
+        unit_of_measurement: files
+```
+
+Then set
+`QUEUE_WEBHOOK_URL=http://<home-assistant>:8123/api/webhook/scan-splitter-queue-CHANGE-ME`.
 
 ## Rate limits
 

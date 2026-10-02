@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 
 from .config import Profile, Settings
 from .naming import unique_path
+from .notify import QueueReporter
 from .pipeline import process_stack
 
 log = logging.getLogger(__name__)
@@ -25,11 +26,19 @@ HEARTBEAT = Path("/tmp/stacksplit.heartbeat")
 
 
 class InboxWatcher:
-    def __init__(self, settings: Settings, profile: Profile, backend, stop: threading.Event) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        profile: Profile,
+        backend,
+        stop: threading.Event,
+        reporter: QueueReporter | None = None,
+    ) -> None:
         self.settings = settings
         self.profile = profile
         self.backend = backend
         self.stop = stop
+        self.reporter = reporter
         # path -> (size, mtime_ns, monotonic time the file last changed)
         self._seen: dict[Path, tuple[int, int, float]] = {}
 
@@ -63,6 +72,8 @@ class InboxWatcher:
 
     def process(self, path: Path) -> None:
         folder = PurePosixPath(path.parent.relative_to(self.profile.inbox).as_posix())
+        if self.reporter:
+            self.reporter.set_processing(self.profile.name, True)
         try:
             process_stack(path, folder, self.settings, self.backend, self.profile)
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the watcher
@@ -75,6 +86,8 @@ class InboxWatcher:
             self._move(path, self.profile.archive, folder)
         finally:
             self._seen.pop(path, None)
+            if self.reporter:
+                self.reporter.set_processing(self.profile.name, False)
 
     def poll_once(self) -> None:
         now = time.monotonic()
@@ -110,8 +123,21 @@ def run_all(settings: Settings, backend) -> None:
     signal.signal(signal.SIGTERM, request_stop)
     signal.signal(signal.SIGINT, request_stop)
 
+    reporter = None
+    if settings.queue_webhook_url:
+        reporter = QueueReporter(
+            settings.queue_webhook_url,
+            settings.profiles,
+            settings.queue_webhook_check_seconds,
+            settings.queue_webhook_heartbeat_seconds,
+        )
+        threading.Thread(target=reporter.run, args=(stop,), name="queue-webhook", daemon=True).start()
+        log.info("queue webhook enabled", extra={"heartbeat_s": settings.queue_webhook_heartbeat_seconds})
+
     workers = [
-        threading.Thread(target=InboxWatcher(settings, profile, backend, stop).run, name=profile.name, daemon=True)
+        threading.Thread(
+            target=InboxWatcher(settings, profile, backend, stop, reporter).run, name=profile.name, daemon=True
+        )
         for profile in settings.profiles
     ]
     for worker in workers:
