@@ -190,8 +190,8 @@ def _retitle(plan: Plan, work: Path, settings: Settings, backend) -> None:
         return
     if backend is None:
         raise RuntimeError("documents without a title need the Mistral API, but no API key is configured")
-    # Every chunk is cached already, so this costs no OCR calls.
-    pages = run_ocr(work / SEARCHABLE, work / "ocr", backend, settings.ocr_chunk_pages, settings.ocr_concurrency)
+    # Mistral OCR chunks are cached already, so this costs no OCR calls.
+    pages = read_text(work / SEARCHABLE, work, settings, backend, plan.text_source)
     chat = CachedChat(backend, work / LLM_CACHE)
     for doc in missing:
         selected = [pages[i] for i in parse_pages(doc.pages, plan.page_count)]
@@ -262,6 +262,24 @@ def write_review(plan: Plan, work: Path) -> None:
     (work / REVIEW).write_text("\n".join(lines), encoding="utf-8")
 
 
+def read_text(src: Path, work: Path, settings: Settings, backend, text_source: str) -> list[Page]:
+    """Per-page text for splitting and naming, from the configured source."""
+    if text_source == "tesseract":
+        # Free and immediate, but plain text: no tables, no separate running
+        # header/footer. Page markers are still found at the page edges.
+        texts = pdfops.page_texts(work / SEARCHABLE)
+        # Tesseract can't tell a photo or an X-ray from an empty page; both
+        # yield no text. has_images=True leaves the blank decision to the
+        # page's ink coverage alone, so image-only pages are never dropped.
+        return [Page(index=i, markdown=text, header="", footer="", has_images=True) for i, text in enumerate(texts)]
+    batch = (
+        BatchOptions(settings.batch_poll_seconds, settings.batch_max_wait_hours * 3600)
+        if settings.ocr_mode == "batch"
+        else None
+    )
+    return run_ocr(src, work / "ocr", backend, settings.ocr_chunk_pages, settings.ocr_concurrency, batch)
+
+
 def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend, profile: Profile) -> Path:
     """Run the whole pipeline for one input file. Returns its work directory."""
     digest = sha256(src)
@@ -270,12 +288,20 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend,
     source = (folder / src.name).as_posix()
     log.info("stack started", extra={"profile": profile.name, "source": source, "work_dir": str(work)})
 
-    batch = (
-        BatchOptions(settings.batch_poll_seconds, settings.batch_max_wait_hours * 3600)
-        if settings.ocr_mode == "batch"
-        else None
-    )
-    pages = run_ocr(src, work / "ocr", backend, settings.ocr_chunk_pages, settings.ocr_concurrency, batch)
+    # The text layer comes first: with text_source "tesseract" it is also
+    # where the text for splitting and naming is read from.
+    searchable = work / SEARCHABLE
+    if not searchable.exists():
+        if settings.ocrmypdf_enabled:
+            pdfops.make_searchable(
+                src, searchable, settings.ocrmypdf_languages, settings.ocrmypdf_jobs, settings.ocrmypdf_extra_args
+            )
+        else:
+            shutil.copyfile(src, searchable)
+
+    pages = read_text(src, work, settings, backend, profile.text_source)
+    if pdfops.page_count(searchable) != len(pages):
+        raise RuntimeError("searchable PDF and OCR result disagree on the page count")
 
     ink_path = work / INK
     if ink_path.exists():
@@ -287,17 +313,6 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend,
         raise RuntimeError("ink measurement and OCR result disagree on the page count")
     pages = [replace(page, ink=value) for page, value in zip(pages, ink)]
 
-    searchable = work / SEARCHABLE
-    if not searchable.exists():
-        if settings.ocrmypdf_enabled:
-            pdfops.make_searchable(
-                src, searchable, settings.ocrmypdf_languages, settings.ocrmypdf_jobs, settings.ocrmypdf_extra_args
-            )
-        else:
-            shutil.copyfile(src, searchable)
-    if pdfops.page_count(searchable) != len(pages):
-        raise RuntimeError("searchable PDF and OCR result disagree on the page count")
-
     plan_path = work / PLAN
     if plan_path.exists():
         plan = Plan.load(plan_path)
@@ -306,6 +321,7 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend,
         chat = CachedChat(backend, work / LLM_CACHE)
         plan = build_plan(pages, settings, chat, source, digest, folder, work / DECISIONS, split=profile.split)
         plan.profile = profile.name
+        plan.text_source = profile.text_source
         plan.save(plan_path)
 
     written = write_outputs(plan, work, settings)

@@ -22,6 +22,20 @@ def page_count(path: Path) -> int:
         return len(pdf.pages)
 
 
+def page_texts(path: Path) -> list[str]:
+    """The text layer of every page, in reading order as stored in the PDF."""
+    doc = pdfium.PdfDocument(str(path))
+    try:
+        texts = []
+        for page in doc:
+            textpage = page.get_textpage()
+            texts.append(textpage.get_text_range())
+            textpage.close()
+        return texts
+    finally:
+        doc.close()
+
+
 def ink_coverage(path: Path, dpi: int = 50) -> list[float]:
     """Share of each page's area (0..1) that is visibly darker than the paper.
 

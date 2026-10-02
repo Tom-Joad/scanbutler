@@ -65,6 +65,9 @@ class Profile:
     name: str
     root: Path
     split: bool
+    # Where the text for splitting and naming comes from: "mistral" (Mistral
+    # OCR, paid) or "tesseract" (the text layer ocrmypdf adds anyway, free).
+    text_source: str = "mistral"
 
     @property
     def inbox(self) -> Path:
@@ -150,10 +153,22 @@ class Settings:
 
         data = Path(_str("DATA_DIR", "/data"))
         profiles = [
-            Profile(name, Path(_str(f"{name.upper()}_DIR", str(data / name))), split)
+            Profile(
+                name,
+                Path(_str(f"{name.upper()}_DIR", str(data / name))),
+                split,
+                _str(f"{name.upper()}_TEXT_SOURCE", "mistral").lower(),
+            )
             for name, split in (("stacks", True), ("scanner", False))
             if _bool(f"{name.upper()}_ENABLED", True)
         ]
+        for profile in profiles:
+            if profile.text_source not in {"mistral", "tesseract"}:
+                raise ConfigError(
+                    f"{profile.name.upper()}_TEXT_SOURCE must be mistral or tesseract, got {profile.text_source!r}"
+                )
+            if profile.text_source == "tesseract" and not _bool("OCRMYPDF_ENABLED", True):
+                raise ConfigError(f"{profile.name.upper()}_TEXT_SOURCE=tesseract needs OCRMYPDF_ENABLED=true")
         if not profiles:
             raise ConfigError("STACKS_ENABLED and SCANNER_ENABLED are both off")
         return cls(

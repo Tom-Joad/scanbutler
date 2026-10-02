@@ -4,6 +4,14 @@ All notable changes to this project are listed here. Versions follow
 [semantic versioning](https://semver.org/); while the major version is 0,
 minor versions may change behaviour or settings.
 
+## [Unreleased]
+
+### Added
+- `STACKS_TEXT_SOURCE` and `SCANNER_TEXT_SOURCE` (`mistral` or `tesseract`).
+  With `tesseract`, splitting and naming read the Tesseract text layer
+  instead of Mistral OCR: no OCR cost and no batch waiting time. The default
+  stays `mistral`. The README compares both on a test stack.
+
 ## [0.5.0] - 2026-10-02
 
 First public release.

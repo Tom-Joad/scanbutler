@@ -74,6 +74,8 @@ class Plan:
     written_files: list[str] = field(default_factory=list)
     # Which profile's output folder `folder` and `written_files` are relative to.
     profile: str = "stacks"
+    # Where the text for splitting and naming came from (mistral or tesseract).
+    text_source: str = "mistral"
 
     def save(self, path: Path) -> None:
         tmp = path.with_suffix(".tmp")

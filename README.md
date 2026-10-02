@@ -48,6 +48,7 @@ Under the hood:
 - [Configuration](#configuration)
 - [Queue webhook (Home Assistant)](#queue-webhook-home-assistant)
 - [Spending limit and paused processing](#spending-limit-and-paused-processing)
+- [Choosing the text source](#choosing-the-text-source)
 - [Rate limits and cost](#rate-limits-and-cost)
 - [Privacy](#privacy)
 - [Unraid](#unraid)
@@ -96,6 +97,13 @@ docker compose run --rm scan-stack-splitter process /data/some.pdf --profile sta
    twice. Uploads and results are deleted from Mistral's file storage
    afterwards. A chunk that fails inside a batch is retried directly.
    `OCR_MODE=direct` skips the batch API.
+
+   Alternatively, an input can read its text from the Tesseract layer that
+   step 5 adds anyway (`STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` set to
+   `tesseract`). That is free and adds no waiting time. The trade-off: plain
+   text instead of structured tables, no separate running headers and footers,
+   and weaker recognition on poor scans. See
+   [Choosing the text source](#choosing-the-text-source).
 2. **Blank pages.** A page is dropped when its image shows almost no ink,
    typically the back of a duplex scan. The check uses the image itself, not
    the OCR text, because OCR models sometimes invent whole paragraphs on an
@@ -177,6 +185,7 @@ them with comments.
 | `DATA_DIR` | `/data` | Parent of the default folders below |
 | `STACKS_DIR` / `SCANNER_DIR` | `$DATA_DIR/stacks`, `$DATA_DIR/scanner` | Root of each input; `inbox/`, `output/`, `archive/` and `failed/` live below it |
 | `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
+| `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` | `mistral` | Text for splitting and naming: `mistral` (Mistral OCR) or `tesseract` (free, from the text layer) |
 | `WORK_DIR` | `$DATA_DIR/work` | OCR results, plans and review files |
 | `TMPDIR` | `/tmp` | Temporary page images; point it at a disk for large stacks |
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
@@ -305,6 +314,37 @@ While paused:
   through, processing resumes on its own and the log shows
   `processing resumed`. That happens, for example, after you raise the limit
   or a new billing month starts.
+
+## Choosing the text source
+
+Splitting and naming read the text of each page. Per input, it can come from
+Mistral OCR (`mistral`) or from the Tesseract text layer (`tesseract`). The
+Tesseract layer is added to every output PDF either way.
+
+| | `mistral` | `tesseract` |
+|---|---|---|
+| Cost | about $1 per 500 pages (batch) | none |
+| Extra waiting time | about a minute per batch job | none |
+| Tables, headers, footers | structured; headers and footers separate | plain text |
+| Poor scans, handwriting | expected to be better (not measured) | expected to be weaker |
+
+A comparison on one test stack used the same text layer for both sources.
+The stack held 80 real documents (156 pages of mostly clean office and
+medical scans):
+
+| | `mistral` | `tesseract` |
+|---|---|---|
+| Boundaries found | 77 of 80 | 75 of 80 |
+| Clear misses | 0 | 2, both flagged for review (image-heavy pages with little text) |
+| Same document type in the title | — | 64 of 81 documents |
+| Same date | — | 73 of 81 documents; the differences favoured neither source |
+
+The remaining misses of both runs were debatable cases. One example is two
+X-ray views of the same examination that had been filed as two documents.
+
+In short: Mistral OCR splits somewhat better. For naming alone, as with
+scanner files, the difference was not measurable. `tesseract` is therefore a
+reasonable choice for `SCANNER_TEXT_SOURCE` if waiting time or cost matters.
 
 ## Rate limits and cost
 
