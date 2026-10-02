@@ -86,6 +86,8 @@ Then put PDFs into `DATA_PATH/inbox/`, optionally in sub-folders. A file is
 picked up once it has not changed for `STABLE_SECONDS`, so copying a large
 scan over the network is safe.
 
+On Unraid, use the template in [`unraid/`](unraid/README-UNRAID.md) instead.
+
 One-off processing without the watcher:
 
 ```bash

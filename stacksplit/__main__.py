@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path, PurePosixPath
 
@@ -45,6 +46,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 2
     logging_setup.configure(settings.log_level)
+
+    # ocrmypdf renders every page into the temp dir. TMPDIR may point into a
+    # mounted volume (to keep gigabytes of page images off RAM-backed /tmp),
+    # and that directory has to exist before the first tempfile is created.
+    if tmpdir := os.environ.get("TMPDIR"):
+        Path(tmpdir).mkdir(parents=True, exist_ok=True)
 
     if command == "rebuild":
         work = Path(args.work_dir)
