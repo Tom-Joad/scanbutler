@@ -1,0 +1,3 @@
+# Keep LF everywhere: the Dockerfile and shell snippets break with CRLF.
+* text=auto eol=lf
+*.pdf binary

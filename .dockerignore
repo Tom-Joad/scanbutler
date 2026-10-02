@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.git
+.gitattributes
+.gitignore
+.github/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+data/
+docker-compose.yml
+README.md
+LICENSE

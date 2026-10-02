@@ -1,0 +1,122 @@
+# scan-stack-splitter
+
+Drop a scanned stack of paper — hundreds of pages, no separator sheets — into a
+folder and get back one searchable PDF per document, named after its content:
+
+```
+inbox/Patient A/stack-01.pdf  (500 pages)
+        ↓
+output/Patient A/Blutbild 2026-09-30.pdf
+output/Patient A/Befundbericht CT Thorax 2026-09-30.pdf
+output/Patient A/Arztbrief Kardiologie 2026-08-14.pdf
+...
+```
+
+Document boundaries are found from the content alone. It uses
+[Mistral OCR](https://docs.mistral.ai/capabilities/document_ai/basic_ocr/) for
+reading and a Mistral chat model for splitting and naming. The searchable text
+layer comes from a fresh Tesseract pass via [ocrmypdf](https://ocrmypdf.readthedocs.io/).
+
+## How it works
+
+1. **OCR**: The stack is sent to Mistral OCR in chunks of 50 pages. Each chunk's
+   result is cached, so an interrupted run never pays for the same page twice.
+2. **Blank pages**: Pages without text or images, typically duplex back sides,
+   are dropped.
+3. **Boundaries**: A chat model reads overlapping windows of 12 pages. It decides
+   for each page whether that page starts a new document, using letterheads,
+   salutations, headings, dates, layout changes and text that continues across
+   pages. Each page's verdict comes from the window where it had the most
+   context. Explicit "page *k* of *n*" markers override the model.
+4. **Naming**: Each document gets a short topic title in the document's language
+   (configurable) and the date it is about: the examination or sampling date for
+   reports, otherwise the issue date.
+5. **Text layer**: ocrmypdf replaces any existing text layer (`--force-ocr`).
+   Before recognition it deskews pages, cleans the image Tesseract sees and
+   upsamples it to 300 dpi. The image uses Tesseract's
+   [`tessdata_best`](https://github.com/tesseract-ocr/tessdata_best) models for
+   German and English. This is slower than the defaults but holds up much better
+   on poor scans.
+6. **Output**: The pages of each document are cut from the searchable stack into
+   `OUTPUT_DIR/<inbox sub-folder>/<title> <date>.pdf`. The PDF title and subject
+   metadata are set too.
+
+The original stack is then moved to `archive/`. A stack that fails is moved to
+`failed/` together with an `.error.txt`. To retry, move it back into the inbox:
+cached OCR is reused.
+
+## Reviewing and correcting splits
+
+Without separator sheets, splitting cannot be perfect. Every stack gets a work
+directory, `work/<sub-folder>/<stack name>-<hash>/`, containing:
+
+- `review.md`: every document with its page range and confidence. Uncertain
+  splits are flagged ⚠ with the model's reason.
+- `plan.json`: the split plan, meant to be edited by hand. Page numbers are
+  1-based ranges such as `"4-6, 9"`.
+
+To fix a split, edit `plan.json`. Change `pages`, merge entries or split them.
+Set `title` to `""` to have the title and date generated again. Then run:
+
+```bash
+docker compose exec scan-stack-splitter stacksplit rebuild "Patient A/stack-01-1a2b3c4d"
+```
+
+The files listed in `written_files` are replaced. Nothing is OCR'd again.
+
+## Setup
+
+```bash
+cp .env.example .env    # set MISTRAL_API_KEY, DATA_PATH, PUID/PGID
+docker compose up -d --build
+docker compose logs -f
+```
+
+Then put PDFs into `DATA_PATH/inbox/`, optionally in sub-folders. A file is
+picked up once it has not changed for `STABLE_SECONDS`, so copying a large
+scan over the network is safe.
+
+One-off processing without the watcher:
+
+```bash
+docker compose run --rm scan-stack-splitter process /data/some.pdf --folder "Patient A"
+```
+
+All settings are environment variables. See [`.env.example`](.env.example).
+The ones you are most likely to change:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MISTRAL_API_KEY` | — | Required |
+| `MISTRAL_LLM_MODEL` | `mistral-medium-latest` | Model for splitting and naming |
+| `TITLE_LANGUAGE` | language of the document | e.g. `German` |
+| `FILENAME_PATTERN` | `{title} {date}` | `{date}` is `YYYY-MM-DD` |
+| `NO_DATE_LABEL` | `undated` | Used when no date is found |
+| `REVIEW_CONFIDENCE` | `0.75` | Below this, a split is flagged |
+| `OCRMYPDF_LANGUAGES` | `deu+eng` | Only `deu`, `eng` ship as best models |
+| `OCRMYPDF_EXTRA_ARGS` | — | Appended to the ocrmypdf call |
+
+## Privacy
+
+Every page is sent to Mistral's API: OCR, then splitting and naming. Only use
+this for documents you are entitled to process that way. If the documents
+belong to someone else, get their consent first. That matters especially for
+health data.
+
+The work directories hold the full OCR text of every stack. Delete them once
+you are happy with the result. Logs contain file names, page numbers and
+counts, but never document text.
+
+## Development
+
+```bash
+docker build -t scan-stack-splitter:dev .
+docker run --rm --user root --entrypoint sh -v "$PWD:/src" -w /src scan-stack-splitter:dev \
+  -c "pip install -q pytest && python -m pytest -q"
+```
+
+The tests replace Mistral with a fake and need no API key.
+
+## License
+
+MIT
