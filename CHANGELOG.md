@@ -35,6 +35,11 @@ the webhook payload are now stable, see the versioning note above.
 - The Unraid template carries its `TemplateURL`, so Unraid can pick up
   template changes.
 
+### CI
+- GitHub Actions updated to their Node 24 releases (setup-python 7,
+  gitleaks-action 3, setup-qemu 4, setup-buildx 4.4.1, login 4.6.0). The
+  secret scan now also works on pull requests, including Dependabot's.
+
 ## [0.12.0] - 2026-10-03
 
 ### Changed
