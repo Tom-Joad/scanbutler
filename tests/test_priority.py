@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 
@@ -57,16 +58,20 @@ def test_scans_go_ahead_of_waiting_stacks():
     assert order == ["scan", "stack"]
 
 
+def copy_as_ocr(name, src, dst):
+    """Stands in for ocrmypdf (not installed in CI): the piece comes back unchanged."""
+    shutil.copyfile(src, dst)
+
+
 def test_stack_text_layer_is_done_in_chunks(tmp_path, monkeypatch):
     src = tmp_path / "stack.pdf"
     make_text_pdf(src, [f"Page {n}" for n in range(1, 6)])
     seen = []
-    real = pdfops._run_modes
 
-    def spy(name, src, *args):
+    def spy(name, src, dst, *args):
         with pikepdf.open(src) as pdf:
             seen.append((name, len(pdf.pages)))
-        return real(name, src, *args)
+        copy_as_ocr(name, src, dst)
 
     monkeypatch.setattr(pdfops, "_run_modes", spy)
     dst = tmp_path / "out.pdf"
@@ -74,8 +79,7 @@ def test_stack_text_layer_is_done_in_chunks(tmp_path, monkeypatch):
     pdfops.make_searchable(src, dst, "eng", "", chunk_pages=2)
 
     assert seen == [("stack.pdf [pages 1-2]", 2), ("stack.pdf [pages 3-4]", 2), ("stack.pdf [pages 5-5]", 1)]
-    # Pages keep their order (redo mode may repeat a line next to the original text).
-    assert [t.split()[:2] for t in pdfops.page_texts(dst)] == [["Page", str(n)] for n in range(1, 6)]
+    assert [t.strip() for t in pdfops.page_texts(dst)] == [f"Page {n}" for n in range(1, 6)]
     assert sorted(p.name for p in tmp_path.iterdir()) == ["out.pdf", "stack.pdf"]  # pieces cleaned up
 
 
@@ -84,13 +88,12 @@ def test_finished_chunks_survive_a_restart(tmp_path, monkeypatch):
     make_text_pdf(src, [f"Page {n}" for n in range(1, 5)])
     dst = tmp_path / "out.pdf"
     calls = []
-    real = pdfops._run_modes
 
-    def fail_second(name, *args):
+    def fail_second(name, src, dst, *args):
         calls.append(name)
         if "pages 3-4" in name and len(calls) == 2:
             raise RuntimeError("container stopped")
-        return real(name, *args)
+        copy_as_ocr(name, src, dst)
 
     monkeypatch.setattr(pdfops, "_run_modes", fail_second)
     try:
