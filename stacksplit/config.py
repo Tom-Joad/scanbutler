@@ -72,6 +72,13 @@ class Profile:
     upload: bool = False
 
     @property
+    def uses_mistral(self) -> bool:
+        """Whether files of this input call Mistral (and so obey its pause)."""
+        # Stacks and scanner always ask the chat model for names; the
+        # Paperless input only calls Mistral when it fetches Mistral OCR.
+        return not self.upload or self.text_source == "mistral"
+
+    @property
     def inbox(self) -> Path:
         return self.root / "inbox"
 
@@ -181,7 +188,15 @@ class Settings:
             # Paperless (and an AI tagger behind it) does the naming and
             # tagging; this input only adds the Tesseract text layer.
             profiles.append(
-                Profile("paperless", Path(_str("PAPERLESS_DIR", str(data / "paperless"))), False, "tesseract", True)
+                Profile(
+                    "paperless",
+                    Path(_str("PAPERLESS_DIR", str(data / "paperless"))),
+                    False,
+                    # mistral: Mistral OCR's text (with tables) replaces the
+                    # document's content in Paperless after upload.
+                    _str("PAPERLESS_TEXT_SOURCE", "tesseract").lower(),
+                    True,
+                )
             )
         try:
             paperless_tags = [int(t) for t in os.environ.get("PAPERLESS_TAGS", "").replace(" ", "").split(",") if t]

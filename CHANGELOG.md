@@ -4,6 +4,18 @@ All notable changes to this project are listed here. Versions follow
 [semantic versioning](https://semver.org/); while the major version is 0,
 minor versions may change behaviour or settings.
 
+## [0.8.0] - 2026-10-03
+
+### Added
+- `PAPERLESS_TEXT_SOURCE=mistral`: the Paperless input reads each file with
+  Mistral OCR before the upload. Right after the document is created, its
+  content in Paperless is replaced with Mistral's Markdown text, so tables
+  keep their structure. The PDF's text layer stays Tesseract's. The default
+  stays `tesseract`.
+
+### Changed
+- The Paperless input obeys the Mistral pause only when it uses Mistral.
+
 ## [0.7.0] - 2026-10-03
 
 ### Added
@@ -95,6 +107,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[0.8.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.4.0...v0.5.0

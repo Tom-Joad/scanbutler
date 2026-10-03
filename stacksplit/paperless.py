@@ -94,6 +94,10 @@ class PaperlessClient:
             raise PaperlessError(f"unexpected upload answer: {str(task_id)[:200]}")
         return task_id
 
+    def set_content(self, document_id: int, content: str) -> None:
+        """Replace the document's text content (what Paperless shows and indexes)."""
+        self._request("PATCH", f"/api/documents/{document_id}/", json={"content": content})
+
     def task(self, task_id: str) -> dict | None:
         result = self._request("GET", "/api/tasks/", params={"task_id": task_id}).json()
         items = result.get("results", []) if isinstance(result, dict) else result

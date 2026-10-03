@@ -18,6 +18,7 @@ class FakePaperless:
     def __init__(self, outcome="SUCCESS", result="Success. New document id 42 created", unavailable=False):
         self.outcome, self.result, self.unavailable = outcome, result, unavailable
         self.uploads: list[tuple[str, list[int]]] = []
+        self.contents: list[tuple[int, str]] = []
         self.finished = True
 
     def upload(self, pdf, filename, tags):
@@ -25,6 +26,11 @@ class FakePaperless:
             raise PaperlessUnavailable("ConnectError: connection refused")
         self.uploads.append((filename, tags))
         return f"task-{len(self.uploads)}"
+
+    def set_content(self, document_id, content):
+        if getattr(self, "content_fails", False):
+            raise PaperlessError("HTTP 400: content rejected")
+        self.contents.append((document_id, content))
 
     def wait(self, task_id, poll_seconds, max_wait_seconds):
         if not self.finished:
@@ -40,10 +46,10 @@ def paperless_settings(settings, monkeypatch):
     return Settings.from_env()
 
 
-def watcher_for(settings, client):
+def watcher_for(settings, client, texts=()):
     profile = settings.profile("paperless")
     profile.inbox.mkdir(parents=True, exist_ok=True)
-    backend = FakeBackend([])  # any Mistral call would fail
+    backend = FakeBackend(list(texts))  # without texts, any Mistral call would fail
     return InboxWatcher(settings, profile, backend, threading.Event(), paperless=client), profile, backend
 
 
@@ -210,3 +216,68 @@ def test_same_original_dropped_twice_is_not_uploaded_again(paperless_settings):
     assert len(client.uploads) == 1
     error = (profile.failed / "scan-again.pdf.error.txt").read_text(encoding="utf-8")
     assert "already uploaded as Paperless document 42" in error
+
+
+TABLE = "| Test | Value | Unit |\n|---|---|---|\n| Leukocytes | 6.2 | /nl |"
+
+
+def test_mistral_text_source_replaces_the_paperless_content(paperless_settings, monkeypatch):
+    monkeypatch.setenv("PAPERLESS_TEXT_SOURCE", "mistral")
+    settings = Settings.from_env()
+    client = FakePaperless()
+    watcher, profile, backend = watcher_for(settings, client, [TABLE, "Page two ![img-0.jpeg](img-0.jpeg)"])
+    make_pdf(profile.inbox / "lab.pdf", 2)
+
+    watcher.poll_once()
+
+    assert backend.jobs  # Mistral OCR was used (batch)
+    assert not backend.chat_calls  # but no naming: Paperless does that
+    assert client.contents == [(42, TABLE + "\n\nPage two")]
+    assert (profile.archive / "lab.pdf").exists()
+
+
+def test_failed_content_update_keeps_the_document(paperless_settings, monkeypatch):
+    monkeypatch.setenv("PAPERLESS_TEXT_SOURCE", "mistral")
+    settings = Settings.from_env()
+    client = FakePaperless()
+    client.content_fails = True
+    watcher, profile, _ = watcher_for(settings, client, ["some text"])
+    make_pdf(profile.inbox / "a.pdf", 1)
+
+    watcher.poll_once()
+
+    assert len(client.uploads) == 1
+    assert (profile.archive / "a.pdf").exists()  # not failed: the document exists in Paperless
+
+
+def test_paperless_content_layout():
+    from stacksplit.ocr import Page
+    from stacksplit.pipeline import paperless_content
+
+    pages = [
+        Page(0, "Body one ![img-0.jpeg](img-0.jpeg)", "Letterhead", "Page 1 of 2", False),
+        Page(1, "  ", "", "", True),
+        Page(2, "Body two", "", "", False),
+    ]
+    assert paperless_content(pages) == "Letterhead\n\nBody one\n\nPage 1 of 2\n\nBody two"
+
+
+def test_paperless_text_source_setting(monkeypatch, paperless_settings):
+    assert paperless_settings.profile("paperless").text_source == "tesseract"
+    assert not paperless_settings.profile("paperless").uses_mistral
+    monkeypatch.setenv("PAPERLESS_TEXT_SOURCE", "Mistral")
+    assert Settings.from_env().profile("paperless").uses_mistral
+    monkeypatch.setenv("PAPERLESS_TEXT_SOURCE", "azure")
+    with pytest.raises(ConfigError):
+        Settings.from_env()
+
+
+def test_client_patches_the_content():
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["method"], seen["path"], seen["body"] = request.method, request.url.path, json.loads(request.read())
+        return httpx.Response(200, json={"id": 42})
+
+    client_with(handler).set_content(42, "| a | b |")
+    assert seen == {"method": "PATCH", "path": "/api/documents/42/", "body": {"content": "| a | b |"}}

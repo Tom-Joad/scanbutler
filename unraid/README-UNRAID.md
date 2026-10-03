@@ -82,6 +82,10 @@ token that has the `read:packages` scope.
   point at this container itself.
 - Create the token in Paperless under *My Profile → API Auth Token*, for the
   user that should own the documents.
+- With `PAPERLESS_TEXT_SOURCE=mistral`, the document's content in Paperless
+  comes from Mistral OCR. Tables then keep their columns as Markdown. It costs
+  about $1 per 500 pages, and each file waits about a minute for the batch
+  job.
 - If Paperless is down, files wait in the inbox and are retried every 5
   minutes. A file that was already uploaded once is not uploaded again; it
   moves to `failed/` with the Paperless document number.

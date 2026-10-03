@@ -212,6 +212,7 @@ them with comments.
 | `PAPERLESS_TOKEN` | — | API token of the Paperless user that should own the documents |
 | `PAPERLESS_DIR` | `$DATA_DIR/paperless` | Root of the input; `inbox/`, `archive/` and `failed/` live below it |
 | `PAPERLESS_TAGS` | — | Comma-separated tag ids to add on upload, e.g. `3,7` |
+| `PAPERLESS_TEXT_SOURCE` | `tesseract` | `mistral` replaces the document's content in Paperless with Mistral OCR's text, tables included; see [below](#paperless-ngx-input) |
 | `PAPERLESS_MAX_WAIT_MINUTES` | `30` | How long to wait for Paperless to consume a file before trying again later |
 
 **Naming**
@@ -381,12 +382,46 @@ and tag itself, for example with an AI tagger such as
 [Zettelrobbe](https://github.com/admonstrator/zettelrobbe). For each file:
 
 1. ocrmypdf adds the Tesseract text layer, with the same settings as for the
-   other inputs. Neither Mistral nor any other paid service is involved.
+   other inputs. By default, no paid service is involved; see
+   [Content from Mistral OCR](#content-from-mistral-ocr) for the option.
 2. The PDF is uploaded through `POST /api/documents/post_document/`, keeping
    its file name and adding `PAPERLESS_TAGS`, if set.
 3. The container follows Paperless's consumption task until a document has
    been created. Only then does the original move to `archive/`, and the work
    copy is deleted.
+
+### Content from Mistral OCR
+
+By default, the content field Paperless shows and searches comes from the
+Tesseract text layer. In that text, tables lose their structure. Set
+`PAPERLESS_TEXT_SOURCE=mistral`, and Mistral OCR reads each file before the
+upload, through the batch API. Right after Paperless confirms the new
+document, its content is replaced with Mistral's Markdown text. A lab report
+then reads:
+
+```
+Laborbefund vom 30.09.2026
+
+| Parameter | Ergebnis | Einheit | Referenz |
+| --- | --- | --- | --- |
+| Leukozyten | 6,2 | /nl | 3,9 - 10,2 |
+```
+
+The same page in Tesseract's text reads `Leukozyten 6,2 /nl 3,9 - 10,2`, one
+line per row, with no columns.
+
+- The PDF's own text layer stays Tesseract's, because only that one has word
+  positions for search and selection in the file.
+- Cost: Mistral OCR at batch price, about $1 per 500 pages. No chat model is
+  involved.
+- An AI tagger such as Zettelrobbe should see the better text. The content is
+  replaced a few seconds after the document appears, and taggers usually poll
+  less often. If yours reacts instantly, it may read Tesseract's text first.
+- If replacing the content fails, the document stays in Paperless with
+  Tesseract's text. A warning is logged, and the file is not uploaded again.
+- A Mistral pause (see [Spending limit](#spending-limit-and-paused-processing))
+  holds this input too, because it uses Mistral. With the default
+  `tesseract`, the input keeps uploading during a pause.
 
 Failure handling:
 

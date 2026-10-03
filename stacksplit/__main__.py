@@ -79,7 +79,9 @@ def main(argv: list[str] | None = None) -> int:
             if profile.upload:
                 paperless = PaperlessClient(settings.paperless_url, settings.paperless_token)
                 try:
-                    document = process_for_paperless(args.pdf, PurePosixPath(args.folder), settings, paperless, profile)
+                    document = process_for_paperless(
+                        args.pdf, PurePosixPath(args.folder), settings, paperless, profile, client
+                    )
                 finally:
                     paperless.close()
                 print(f"Paperless document {document}")

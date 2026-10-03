@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
@@ -32,6 +33,7 @@ REVIEW = "review.md"
 INK = "ink.json"
 DECISIONS = "decisions.json"
 LLM_CACHE = "llm"
+_IMAGE_REF = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 UPLOAD = "paperless_task.json"
 # sha256 of every original handed to Paperless -> document id and date.
 LEDGER = "uploaded.json"
@@ -355,8 +357,27 @@ def rebuild(work: Path, settings: Settings, backend) -> list[Path]:
     return written
 
 
-def process_for_paperless(src: Path, folder: PurePosixPath, settings: Settings, client, profile: Profile) -> int | None:
+def paperless_content(pages: list[Page]) -> str:
+    """Mistral OCR pages as one text for Paperless: Markdown, tables kept, images left out."""
+    blocks = []
+    for page in pages:
+        parts = [page.header, _IMAGE_REF.sub("", page.markdown), page.footer]
+        text = "\n\n".join(part.strip() for part in parts if part and part.strip())
+        if text:
+            blocks.append(text)
+    return "\n\n".join(blocks)
+
+
+def process_for_paperless(
+    src: Path, folder: PurePosixPath, settings: Settings, client, profile: Profile, backend=None
+) -> int | None:
     """Add the Tesseract text layer and hand the file to Paperless-ngx.
+
+    With text_source "mistral", Mistral OCR reads the file before the upload,
+    and its text replaces the document's content in Paperless right after
+    the document is created: tables and layout survive far better than in
+    Tesseract's plain text. The PDF's own text layer stays Tesseract's,
+    because only that one has word positions.
 
     Returns the new Paperless document id. The task id is stored right after
     the upload, so a restart waits for that task instead of uploading the
@@ -387,6 +408,13 @@ def process_for_paperless(src: Path, folder: PurePosixPath, settings: Settings, 
         else:
             shutil.copyfile(src, searchable)
 
+    content = None
+    if profile.text_source == "mistral":
+        # Fetched before the upload, so the content can be replaced within
+        # seconds of the document appearing: before a tagger watching
+        # Paperless is likely to read it.
+        content = paperless_content(read_text(src, work, settings, backend, "mistral"))
+
     state = work / UPLOAD
     if state.exists():
         task_id = json.loads(state.read_text(encoding="utf-8"))["task_id"]
@@ -408,6 +436,14 @@ def process_for_paperless(src: Path, folder: PurePosixPath, settings: Settings, 
 
     document = task_document_id(task)
     log.info("paperless document created", extra={"source": source, "document": document})
+    if content is not None and document is not None:
+        try:
+            client.set_content(document, content)
+            log.info("paperless content replaced", extra={"document": document, "chars": len(content)})
+        except (PaperlessError, PaperlessUnavailable) as exc:
+            # The document exists either way; uploading again would only
+            # create a duplicate. Keep Tesseract's content and say so.
+            log.warning("paperless content not replaced", extra={"document": document, "error": str(exc)[:300]})
     uploaded[digest] = {"document": document, "file": source, "date": date.today().isoformat()}
     tmp = ledger.with_suffix(".tmp")
     tmp.write_text(json.dumps(uploaded, ensure_ascii=False, indent=1), encoding="utf-8")

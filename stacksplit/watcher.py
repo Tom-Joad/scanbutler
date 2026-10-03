@@ -85,7 +85,7 @@ class InboxWatcher:
             self.reporter.set_processing(self.profile.name, True)
         try:
             if self.profile.upload:
-                process_for_paperless(path, folder, self.settings, self.paperless, self.profile)
+                process_for_paperless(path, folder, self.settings, self.paperless, self.profile, self.backend)
             else:
                 process_stack(path, folder, self.settings, self.backend, self.profile)
         except PaperlessUnavailable as exc:
@@ -102,7 +102,7 @@ class InboxWatcher:
                 # sending more until the account accepts work again.
                 self.gate.pause(str(limit))
                 return
-            if not self.profile.upload:  # a Paperless upload says nothing about Mistral
+            if self.profile.uses_mistral:  # a plain Paperless upload says nothing about Mistral
                 self.gate.done()
             log.exception("stack failed", extra={"profile": self.profile.name, "source": (folder / path.name).as_posix()})
             target = self._move(path, self.profile.failed, folder)
@@ -110,7 +110,7 @@ class InboxWatcher:
                 f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}", encoding="utf-8"
             )
         else:
-            if not self.profile.upload:
+            if self.profile.uses_mistral:
                 self.gate.done()
             self._move(path, self.profile.archive, folder)
         finally:
@@ -126,8 +126,8 @@ class InboxWatcher:
             if self.stop.is_set():
                 return
             if self._ready(path, now):
-                # Paperless uploads need no Mistral, so a Mistral pause doesn't stop them.
-                if not self.profile.upload and not self.gate.may_process():
+                # Plain Paperless uploads need no Mistral, so a Mistral pause doesn't stop them.
+                if self.profile.uses_mistral and not self.gate.may_process():
                     break
                 self.process(path)
                 if now < self._retry_after:
