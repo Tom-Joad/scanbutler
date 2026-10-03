@@ -66,6 +66,7 @@ Under the hood:
 - [How it works](#how-it-works)
 - [Reviewing and correcting splits](#reviewing-and-correcting-splits)
 - [Configuration](#configuration)
+- [Languages](#languages)
 - [Queue webhook (Home Assistant)](#queue-webhook-home-assistant)
 - [Spending limit and paused processing](#spending-limit-and-paused-processing)
 - [Choosing the text source](#choosing-the-text-source)
@@ -229,7 +230,8 @@ the same owner as everything else.
    ships Tesseract's
    [`tessdata_best`](https://github.com/tesseract-ocr/tessdata_best) models
    for German and English. They are slower than the defaults, but hold up much
-   better on poor scans.
+   better on poor scans. Other languages are downloaded on first use, see
+   [Languages](#languages).
 6. **Output.** Each document's pages are cut from the searchable scan into
    `<input>/output/<sub-folder>/<title> <date>.pdf`. The PDF's title and
    subject metadata are set as well.
@@ -280,7 +282,7 @@ Debian base and behaves like their containers: it starts as root, gives the
 | `-e PGID` | `911` | Group ID for new files (Unraid: `100`) |
 | `-e UMASK` | `022` | Permission mask for new files; `002` makes them writable for the group |
 | `-e TZ` | `Etc/UTC` | Time zone, e.g. `Europe/Berlin` |
-| `-v /config` | | Work folder: plans, caches, review files, the Paperless upload ledger and temporary page images |
+| `-v /config` | | Work folder: plans, caches, review files, the Paperless upload ledger, temporary page images and downloaded languages |
 | `-v /data` | | The inputs: `stacks/`, `scanner/`, `paperless/` |
 
 Don't run the container with `--user` or `--init`: the base image's init
@@ -351,7 +353,8 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | Variable | Default | Purpose |
 |---|---|---|
 | `OCRMYPDF_ENABLED` | `true` | `false` keeps the scan's own text layer, if any |
-| `OCRMYPDF_LANGUAGES` | `deu+eng` | Tesseract languages; only `deu` and `eng` ship as best models |
+| `OCRMYPDF_LANGUAGES` | `deu+eng` | Tesseract languages, joined with `+`, e.g. `deu+eng+fra`; see [Languages](#languages) |
+| `TESSDATA_URL` | tessdata_best `4.1.0` on GitHub | Where languages that aren't built in are downloaded from; a mirror must serve the same files |
 | `OCRMYPDF_JOBS` | `auto` | Parallel OCR pages, shared by all inputs; `auto` follows the memory and CPU limits, see [System requirements](#system-requirements) |
 | `OCRMYPDF_MAX_IMAGE_DPI` | `600` | Images sharper than this are downsampled before OCR; plenty for text, and it bounds each page's memory. `0` disables it |
 | `OCRMYPDF_EXTRA_ARGS` | — | Appended to the ocrmypdf call |
@@ -370,6 +373,31 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `QUEUE_WEBHOOK_CHECK_SECONDS` | `10` | How often the queue is counted |
 | `QUEUE_WEBHOOK_HEARTBEAT_SECONDS` | `300` | Resend interval without changes |
 | `LOG_LEVEL` | `INFO` | Logs are JSON lines on stdout |
+
+## Languages
+
+`deu`, `eng` and `osd` (page orientation) are built into the image. Any
+other language in `OCRMYPDF_LANGUAGES` is downloaded at startup, once:
+
+- Models come from [`tessdata_best`](https://github.com/tesseract-ocr/tessdata_best)
+  at the pinned tag `4.1.0`. Every download is checked against a SHA-256
+  list shipped in the image; a file that doesn't match is discarded.
+- They are kept in `/config/tessdata` and survive image updates. Delete a
+  file there to download it again.
+- Codes are Tesseract's three-letter ones: `fra`, `ita`, `spa`, `pol`,
+  `tur`, `chi_sim` and so on, 124 in total. A misspelt code stops the
+  container with a hint, e.g. `unknown language 'ger' (did you mean 'deu'?)`.
+- Without internet access, a language that isn't downloaded yet is left out
+  with a warning, and the rest keeps working; the built-in languages always
+  do. A local mirror can stand in via `TESSDATA_URL`.
+
+The start of the log says what is in use:
+
+```json
+{"event":"languages ready","languages":"deu+eng+fra","downloaded":["fra"],"cached":[],"missing":[]}
+```
+
+More languages make OCR slower; list only the ones your documents use.
 
 ## Queue webhook (Home Assistant)
 
@@ -604,6 +632,8 @@ health or financial records.
   Paperless. Only the register of uploaded originals remains: checksum, file
   name, document id and date.
 - The queue webhook sends counts only.
+- Languages beyond the built-in ones are downloaded from GitHub (or
+  `TESSDATA_URL`) at startup. The request names only the language file.
 
 ## Unraid
 

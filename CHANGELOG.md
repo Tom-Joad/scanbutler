@@ -5,6 +5,23 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.2.0] - 2026-10-03
+
+### Added
+- **More OCR languages.** Every language in `OCRMYPDF_LANGUAGES` that isn't
+  built in (`deu`, `eng`, `osd`) is downloaded at startup from
+  tessdata_best `4.1.0`, checked against SHA-256 checksums shipped in the
+  image, and kept in `/config/tessdata`, so it is downloaded only once and
+  survives image updates. Example: `OCRMYPDF_LANGUAGES=deu+eng+fra`.
+- A misspelt language code stops the container with a hint, e.g.
+  `unknown language 'ger' (did you mean 'deu'?)`.
+- Without internet access, a language that can't be downloaded is left out
+  with a warning instead of stopping the container.
+- The log reports the languages in use (`languages ready`), and which were
+  downloaded, cached or left out.
+- `TESSDATA_URL` points the download at a mirror.
+- The Unraid template shows `OCRMYPDF_LANGUAGES`.
+
 ## [1.1.0] - 2026-10-03
 
 ### Added
@@ -263,6 +280,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v1.0.0
 [0.12.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.1...v0.12.0
