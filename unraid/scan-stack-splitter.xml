@@ -19,7 +19,7 @@
     a webhook such as Home Assistant. Needs a Mistral API key.
   </Overview>
   <Category>Productivity: Tools:</Category>
-  <ExtraParams>--init --user 99:100 --security-opt no-new-privileges</ExtraParams>
+  <ExtraParams>--init --user 99:100 --security-opt no-new-privileges --memory=4g</ExtraParams>
   <Config Name="Stacks" Target="/data/stacks" Default="/mnt/user/Documents/scan-stack-splitter/stacks" Mode="rw" Description="Large scans to split. inbox/, output/, archive/ and failed/ are created here." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="Scanner" Target="/data/scanner" Default="/mnt/user/Documents/scan-stack-splitter/scanner" Mode="rw" Description="Scanner input, one document per file. Point the scanner's network-folder target at inbox/ below this path." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="Paperless" Target="/data/paperless" Default="/mnt/user/Documents/scan-stack-splitter/paperless" Mode="rw" Description="Optional Paperless-ngx input (needs PAPERLESS_URL): files get the text layer and are uploaded to Paperless." Type="Path" Display="always" Required="false" Mask="false"/>
@@ -29,7 +29,7 @@
   <Config Name="MISTRAL_MAX_RPS" Target="MISTRAL_MAX_RPS" Default="1" Mode="" Description="Requests per second, slightly below your account's limit for MISTRAL_LLM_MODEL (Mistral console: API &gt; Limits)" Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="TITLE_LANGUAGE" Target="TITLE_LANGUAGE" Default="" Mode="" Description="Language for document titles, e.g. German. Empty: the language of each document." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="NO_DATE_LABEL" Target="NO_DATE_LABEL" Default="undated" Mode="" Description="Used in the file name when a document has no date" Type="Variable" Display="always" Required="false" Mask="false"/>
-  <Config Name="OCRMYPDF_JOBS" Target="OCRMYPDF_JOBS" Default="4" Mode="" Description="CPU cores for the Tesseract text layer" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="OCRMYPDF_JOBS" Target="OCRMYPDF_JOBS" Default="auto" Mode="" Description="Parallel OCR pages. auto: as many as the container's memory allows (--memory in Extra Parameters), at most one per CPU core" Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="PAPERLESS_URL" Target="PAPERLESS_URL" Default="" Mode="" Description="Optional: Paperless-ngx base URL, e.g. http://NAS-IP:8000. Enables the Paperless input." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="PAPERLESS_TOKEN" Target="PAPERLESS_TOKEN" Default="" Mode="" Description="API token of the Paperless user that should own the uploaded documents" Type="Variable" Display="always" Required="false" Mask="true"/>
   <Config Name="PAPERLESS_TEXT_SOURCE" Target="PAPERLESS_TEXT_SOURCE" Default="tesseract" Mode="" Description="tesseract: Paperless content from the text layer (free). mistral: content replaced with Mistral OCR text, tables kept (about $1 per 500 pages)." Type="Variable" Display="always" Required="false" Mask="false"/>

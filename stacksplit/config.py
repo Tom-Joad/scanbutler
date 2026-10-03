@@ -56,6 +56,39 @@ def _bool(name: str, default: bool) -> bool:
     raise ConfigError(f"{name} must be true/false, got {raw!r}")
 
 
+# Measured: four A4 pages with 1550-dpi colour images, downsampled to 600 dpi
+# and OCR'd with 4 jobs, peaked at 1.64 GB. Budget with headroom per parallel
+# page, plus a base for the app itself, Ghostscript and uploads.
+JOB_MEMORY_GB = 0.75
+BASE_MEMORY_GB = 1.0
+
+
+def memory_limit_bytes() -> int | None:
+    """The container's memory limit (cgroup v2/v1), else the machine's total memory."""
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            raw = Path(path).read_text().strip()
+        except OSError:
+            continue
+        if raw.isdigit() and int(raw) < 1 << 60:  # cgroup v1 reports "no limit" as a huge number
+            return int(raw)
+    try:
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemTotal:"):
+                return int(line.split()[1]) * 1024
+    except OSError:
+        pass
+    return None
+
+
+def auto_jobs(memory_bytes: int | None, cpus: int) -> int:
+    """Parallel OCR pages that fit the memory: less memory just means slower."""
+    if memory_bytes is None:
+        return max(1, min(cpus, 4))
+    fitting = int((memory_bytes / 2**30 - BASE_MEMORY_GB) / JOB_MEMORY_GB)
+    return max(1, min(cpus, fitting))
+
+
 @dataclass(frozen=True)
 class Profile:
     """One input channel with its own folders.
@@ -244,13 +277,18 @@ class Settings:
             no_date_label=_str("NO_DATE_LABEL", "undated"),
             ocrmypdf_enabled=_bool("OCRMYPDF_ENABLED", True),
             ocrmypdf_languages=_str("OCRMYPDF_LANGUAGES", "deu+eng"),
-            ocrmypdf_jobs=_int("OCRMYPDF_JOBS", os.cpu_count() or 1, minimum=1),
+            ocrmypdf_jobs=(
+                auto_jobs(memory_limit_bytes(), os.cpu_count() or 1)
+                if _str("OCRMYPDF_JOBS", "auto").lower() == "auto"
+                else _int("OCRMYPDF_JOBS", 1, minimum=1)
+            ),
             ocrmypdf_extra_args=os.environ.get("OCRMYPDF_EXTRA_ARGS", "").strip(),
             ocr_limits=OcrLimits(
                 max_ocr_mpixels=_int("OCRMYPDF_MAX_OCR_MPIXELS", 50, minimum=1),
                 page_timeout=_int("OCRMYPDF_PAGE_TIMEOUT", 300, minimum=10),
                 file_timeout_minutes=_int("OCRMYPDF_FILE_TIMEOUT_MINUTES", 120, minimum=1),
                 skip_big_mpixels=_int("OCRMYPDF_SKIP_BIG_MPIXELS", 200, minimum=1),
+                max_image_dpi=_int("OCRMYPDF_MAX_IMAGE_DPI", 600, minimum=0),
             ),
             pause_retry_minutes=_float("PAUSE_RETRY_MINUTES", 30.0),
             paperless_url=paperless_url,
@@ -268,3 +306,15 @@ class Settings:
             if profile.name == name:
                 return profile
         raise ConfigError(f"profile {name!r} is not enabled")
+
+    def jobs_for(self, profile: Profile) -> int:
+        """This input's share of the OCR jobs; all inputs may run at the same time.
+
+        Scanner and Paperless files are short, so they get one job each and
+        the stacks input gets the rest. Without stacks, the others share.
+        """
+        if "stacks" not in {p.name for p in self.profiles}:
+            return max(1, self.ocrmypdf_jobs // len(self.profiles))
+        if profile.split:
+            return max(1, self.ocrmypdf_jobs - (len(self.profiles) - 1))
+        return 1

@@ -29,6 +29,9 @@ class JsonFormatter(logging.Formatter):
         # Anything passed via logger.info(..., extra={...}) becomes a field.
         for key, value in record.__dict__.items():
             if key not in _RESERVED and key not in payload and not key.startswith("_"):
+                # ocrmypdf tags every log record with an empty "pageno".
+                if key == "pageno" and value is None:
+                    continue
                 payload[key] = value
 
         if record.exc_info:

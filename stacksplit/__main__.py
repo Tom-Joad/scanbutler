@@ -8,8 +8,8 @@ import os
 import sys
 from pathlib import Path, PurePosixPath
 
-from . import __version__, logging_setup
-from .config import ConfigError, Settings
+from . import __version__, logging_setup, pdfops
+from .config import ConfigError, Settings, memory_limit_bytes
 from .mistral import MistralClient
 from .paperless import PaperlessClient
 from .pipeline import process_for_paperless, process_stack, rebuild
@@ -54,7 +54,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 2
     logging_setup.configure(settings.log_level)
-    log.info("starting", extra={"version": __version__, "command": command})
+    pdfops.configure_jobs(settings.ocrmypdf_jobs)
+    memory = memory_limit_bytes()
+    log.info(
+        "starting",
+        extra={
+            "version": __version__,
+            "command": command,
+            "memory_gb": round(memory / 2**30, 1) if memory else None,
+            "ocr_jobs_total": settings.ocrmypdf_jobs,
+            "ocr_jobs": {p.name: settings.jobs_for(p) for p in settings.profiles},
+        },
+    )
 
     # ocrmypdf renders every page into the temp dir. TMPDIR may point into a
     # mounted volume (to keep gigabytes of page images off RAM-backed /tmp),

@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -103,12 +105,90 @@ class OcrLimits:
     file_timeout_minutes: int = 120
     # In the last-resort mode, pages above this are kept without new OCR.
     skip_big_mpixels: int = 200
+    # Images sharper than this are downsampled before OCR (0 = never). Text
+    # needs no more; it keeps a page's raster, and so the memory, bounded:
+    # A4 at 600 dpi is ~35 megapixels instead of ~230 at 1550 dpi.
+    max_image_dpi: int = 600
 
     def args(self, mode: str) -> list[str]:
         extra = ["--max-ocr-image-mpixels", str(self.max_ocr_mpixels), "--tesseract-timeout", str(self.page_timeout)]
         if mode == "plain":
             extra += ["--skip-big", str(self.skip_big_mpixels)]
         return extra
+
+
+class JobBudget:
+    """OCR jobs shared by all inputs; a run that doesn't fit waits for one to finish.
+
+    Each input runs in its own thread, and each ocrmypdf run starts several
+    jobs, one page each. The budget follows the container's memory, so less
+    memory means waiting, never running out.
+    """
+
+    def __init__(self, total: int) -> None:
+        self.total = max(1, total)
+        self._free = self.total
+        self._cond = threading.Condition()
+
+    @contextmanager
+    def reserve(self, jobs: int):
+        jobs = max(1, min(jobs, self.total))
+        with self._cond:
+            if self._free < jobs:
+                log.info("waiting for memory budget", extra={"jobs": jobs, "free": self._free})
+            self._cond.wait_for(lambda: self._free >= jobs)
+            self._free -= jobs
+        try:
+            yield jobs
+        finally:
+            with self._cond:
+                self._free += jobs
+                self._cond.notify_all()
+
+
+# Set once at startup (see __main__); unlimited unless configured.
+JOBS = JobBudget(1 << 16)
+
+
+def configure_jobs(total: int) -> None:
+    global JOBS
+    JOBS = JobBudget(total)
+
+
+def max_image_dpi(path: Path) -> float:
+    """The highest image resolution on any page, as ocrmypdf will rasterize it."""
+    from ocrmypdf.pdfinfo import PdfInfo  # heavy import, only needed here
+
+    best = 0.0
+    for page in PdfInfo(path).pages:
+        if page.dpi:
+            best = max(best, page.dpi.x, page.dpi.y)
+    return best
+
+
+def downsample_images(src: Path, dst: Path, dpi: int) -> None:
+    """Rewrite `src` with every image above `dpi` downsampled to `dpi` (Ghostscript).
+
+    Text and vector graphics stay as they are. Downsampled images are stored
+    as high-quality JPEG (colour, grey) or CCITT (black and white).
+    """
+    cmd = [
+        "gs", "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER",
+        "-sDEVICE=pdfwrite", "-dCompatibilityLevel=1.7",
+        "-dDownsampleColorImages=true", "-dDownsampleGrayImages=true", "-dDownsampleMonoImages=true",
+        f"-dColorImageResolution={dpi}", f"-dGrayImageResolution={dpi}", f"-dMonoImageResolution={dpi}",
+        "-dColorImageDownsampleThreshold=1.0", "-dGrayImageDownsampleThreshold=1.0",
+        "-dMonoImageDownsampleThreshold=1.0",
+        "-dColorImageDownsampleType=/Bicubic", "-dGrayImageDownsampleType=/Bicubic",
+        "-dAutoFilterColorImages=false", "-dAutoFilterGrayImages=false",
+        "-dColorImageFilter=/DCTEncode", "-dGrayImageFilter=/DCTEncode", "-dJPEGQ=92",
+        f"-sOutputFile={dst}",
+        str(src),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        dst.unlink(missing_ok=True)
+        raise RuntimeError(f"Ghostscript could not downsample images: {result.stderr.strip()[-500:]}")
 
 
 def ocr_modes(has_text: bool, tagged: bool = False) -> list[tuple[str, list[str]]]:
@@ -156,6 +236,39 @@ def make_searchable(
         has_text = tagged = False
     log.info("text layer started", extra={"file": src.name, "has_text": has_text, "tagged": tagged})
 
+    # Tagged PDFs are not re-OCR'd at all, so they don't need this.
+    ocr_input, prepared = src, dst.with_name(dst.name + ".prepared.pdf")
+    if limits.max_image_dpi and not tagged:
+        try:
+            dpi = max_image_dpi(src)
+        except Exception:  # noqa: BLE001 - leave odd files to ocrmypdf's own error handling
+            dpi = 0.0
+        if dpi > limits.max_image_dpi * 1.05:
+            downsample_images(src, prepared, limits.max_image_dpi)
+            ocr_input = prepared
+            log.info(
+                "images downsampled",
+                extra={"file": src.name, "from_dpi": round(dpi), "to_dpi": limits.max_image_dpi},
+            )
+    try:
+        with JOBS.reserve(jobs) as granted:
+            _run_modes(src.name, ocr_input, dst, tmp, languages, granted, extra_args, limits, has_text, tagged)
+    finally:
+        prepared.unlink(missing_ok=True)
+
+
+def _run_modes(
+    name_for_log: str,
+    src: Path,
+    dst: Path,
+    tmp: Path,
+    languages: str,
+    jobs: int,
+    extra_args: str,
+    limits: OcrLimits,
+    has_text: bool,
+    tagged: bool,
+) -> None:
     errors = []
     for name, options in ocr_modes(has_text, tagged):
         cmd = [
@@ -178,12 +291,12 @@ def make_searchable(
             )
         if result.returncode == 0:
             tmp.replace(dst)
-            log.info("text layer done", extra={"file": src.name, "mode": name, "fallback": bool(errors)})
+            log.info("text layer done", extra={"file": name_for_log, "mode": name, "fallback": bool(errors)})
             return
         tmp.unlink(missing_ok=True)
         error = _ocrmypdf_error(result.returncode, result.stderr)
         errors.append(f"{name}: {error}")
-        log.warning("text layer mode failed", extra={"file": src.name, "mode": name, "error": error})
+        log.warning("text layer mode failed", extra={"file": name_for_log, "mode": name, "error": error})
     raise RuntimeError("ocrmypdf failed in every mode. " + " || ".join(errors))
 
 

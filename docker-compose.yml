@@ -17,10 +17,17 @@ services:
       # Holds stacks/, scanner/ and work/ (see README > Quick start).
       - ${DATA_PATH:-./data}:/data
 
+    # OCR jobs adapt to this limit: less memory makes processing slower, not
+    # fail. 4 GB lets all inputs run at once; 1 GB is the tested minimum.
+    mem_limit: 4g
+
+    environment:
+      # Page images go to disk: a RAM-backed /tmp would count against mem_limit.
+      TMPDIR: /data/work/tmp
+
     read_only: true
     tmpfs:
-      # ocrmypdf renders every page here; size it for the largest stack.
-      - /tmp:size=8g
+      - /tmp:size=64m
     security_opt:
       - no-new-privileges:true
 

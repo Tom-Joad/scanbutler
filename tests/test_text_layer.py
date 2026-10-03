@@ -42,6 +42,11 @@ def fake_ocrmypdf(monkeypatch, outcomes):
 
     def run(cmd, capture_output, text, timeout=None):
         calls.append(cmd)
+        if cmd[0] == "gs":  # downsampling: always succeeds, writes its output file
+            out = next(arg.split("=", 1)[1] for arg in cmd if arg.startswith("-sOutputFile="))
+            with open(out, "wb") as handle:
+                handle.write(b"%PDF-1.4 downsampled")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
         returncode, stderr = outcomes.pop(0)
         if returncode == "timeout":
             raise subprocess.TimeoutExpired(cmd, timeout)
@@ -126,3 +131,43 @@ def test_limit_settings(monkeypatch):
     monkeypatch.setenv("OCRMYPDF_FILE_TIMEOUT_MINUTES", "45")
     limits = Settings.from_env().ocr_limits
     assert (limits.max_ocr_mpixels, limits.file_timeout_minutes) == (30, 45)
+
+
+def image_pdf(path, pixels: int, dpi: int) -> None:
+    from PIL import Image
+
+    Image.new("RGB", (pixels, pixels), (255, 255, 255)).save(path, resolution=dpi)
+
+
+def test_images_above_the_limit_are_downsampled_first(tmp_path, monkeypatch):
+    src = tmp_path / "logo.pdf"
+    image_pdf(src, 1550, 1550)  # one square inch at 1550 dpi
+    assert round(pdfops.max_image_dpi(src)) == 1550
+    calls = fake_ocrmypdf(monkeypatch, [(0, "")])
+
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "")
+
+    gs, ocr = calls
+    assert gs[0] == "gs" and "-dColorImageResolution=600" in gs
+    assert ocr[-2].endswith(".prepared.pdf")  # ocrmypdf reads the downsampled copy
+    assert not list(tmp_path.glob("*.prepared.pdf"))  # and it is cleaned up
+
+
+def test_normal_scans_are_not_rewritten(tmp_path, monkeypatch):
+    src = tmp_path / "scan.pdf"
+    image_pdf(src, 600, 300)
+    calls = fake_ocrmypdf(monkeypatch, [(0, "")])
+
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "")
+
+    assert len(calls) == 1 and calls[0][0] == "ocrmypdf" and calls[0][-2] == str(src)
+
+
+def test_downsampling_can_be_switched_off(tmp_path, monkeypatch):
+    src = tmp_path / "logo.pdf"
+    image_pdf(src, 1550, 1550)
+    calls = fake_ocrmypdf(monkeypatch, [(0, "")])
+
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "", pdfops.OcrLimits(max_image_dpi=0))
+
+    assert [cmd[0] for cmd in calls] == ["ocrmypdf"]

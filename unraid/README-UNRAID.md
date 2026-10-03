@@ -23,7 +23,7 @@ interface; everything it does shows up in the container log.
    | `MISTRAL_MAX_RPS` | a little below your account's requests-per-second limit for that model |
    | `TITLE_LANGUAGE` | e.g. `English`; leave empty to use each document's language |
    | `NO_DATE_LABEL` | the word used when a document has no date, e.g. `undated` |
-   | `OCRMYPDF_JOBS` | leave some cores for the rest of the server |
+   | `OCRMYPDF_JOBS` | `auto`: follows the memory limit (`--memory=4g` in *Extra Parameters*) |
    | `PAPERLESS_URL`, `PAPERLESS_TOKEN` | optional, enable the Paperless input; see below |
    | `QUEUE_WEBHOOK_URL` | optional, e.g. a Home Assistant webhook; see the [main README](../README.md#queue-webhook-home-assistant) |
 
@@ -109,6 +109,11 @@ appear on their own. Add them with **Add another Path, Port, Variable**; the
 [changelog](../CHANGELOG.md) names new settings.
 
 ## Notes
+
+- The template limits the container to 4 GB (`--memory=4g` in *Extra
+  Parameters*), and OCR adapts to that limit. 1 GB is the tested minimum: it
+  is slower, but it doesn't fail. See the main README under
+  [System requirements](../README.md#system-requirements).
 
 - The container runs as `nobody:users` (99:100), like Unraid's shares, so
   output files can be edited and deleted over SMB.

@@ -54,6 +54,7 @@ Under the hood:
 
 ## Contents
 
+- [System requirements](#system-requirements)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Reviewing and correcting splits](#reviewing-and-correcting-splits)
@@ -66,6 +67,42 @@ Under the hood:
 - [Privacy](#privacy)
 - [Unraid](#unraid)
 - [Development](#development)
+
+## System requirements
+
+| | Minimum | Recommended |
+|---|---|---|
+| Memory for the container | 1 GB | 4 GB |
+| CPU | 64-bit x86 (amd64) or ARM (arm64) | 4 or more cores |
+| Disk, work folder | a few GB free | several GB free for 500-page stacks |
+| Software | Docker 20.10 or newer | |
+| Network | HTTPS to `api.mistral.ai`; optionally Paperless and Home Assistant on the LAN | |
+
+The container adapts to its memory. With `OCRMYPDF_JOBS=auto`, the default,
+it runs as many OCR pages in parallel as its memory limit allows: 1 GB as a
+base plus 0.75 GB per page, at most one per CPU core. All inputs share that
+budget. A run that doesn't fit waits for another to finish. Less memory
+therefore makes processing slower, never makes it fail.
+
+Measured with a worst-case file: four A4 pages, each holding a colour image
+at 1550 dpi. The images are downsampled to 600 dpi first, see
+`OCRMYPDF_MAX_IMAGE_DPI`.
+
+| Container memory | Parallel pages | Peak memory | Time |
+|---|---|---|---|
+| 768 MB | 1 | 625 MB | 53 s |
+| 4 GB | 4 | 1.64 GB | 24 s |
+
+For scale: 156 ordinary scanned pages took about 4.5 minutes on a 12-thread
+desktop CPU. Expect a low-power NAS CPU to be several times slower. That is
+fine for a folder watcher, but a 500-page stack may then take hours.
+
+**Synology and other NAS systems:** in Container Manager, set the memory limit
+under *Resources* to at least 1 GB, or 4 GB if available. NAS models with
+32-bit ARM CPUs (armv7) are not supported; check your model's CPU
+architecture. Map the data and work folders to a shared folder, and run the
+container as a user that may write there (`PUID`/`PGID` in
+`docker-compose.yml`).
 
 ## Quick start
 
@@ -149,7 +186,11 @@ docker compose run --rm scan-stack-splitter process /data/some.pdf --profile sta
      on a page, and cleaning a page with a high-resolution logo at that size
      can exhaust the memory.
 
-   Every mode runs within limits, so one odd page can't exhaust the server.
+   Images sharper than 600 dpi, such as a high-resolution logo, are first
+   downsampled with Ghostscript. Text and vector graphics stay untouched.
+   Without this, ocrmypdf would rasterize the whole page at the image's
+   resolution. Every mode also runs within limits, so one odd page can't
+   exhaust the server.
    Tesseract sees at most `OCRMYPDF_MAX_OCR_MPIXELS` per page, and each page
    and each run has a time limit. The visible page is never downsampled.
 
@@ -262,7 +303,8 @@ them with comments.
 |---|---|---|
 | `OCRMYPDF_ENABLED` | `true` | `false` keeps the scan's own text layer, if any |
 | `OCRMYPDF_LANGUAGES` | `deu+eng` | Tesseract languages; only `deu` and `eng` ship as best models |
-| `OCRMYPDF_JOBS` | number of CPUs | Parallel Tesseract jobs |
+| `OCRMYPDF_JOBS` | `auto` | Parallel OCR pages, shared by all inputs; `auto` follows the memory limit, see [System requirements](#system-requirements) |
+| `OCRMYPDF_MAX_IMAGE_DPI` | `600` | Images sharper than this are downsampled before OCR; plenty for text, and it bounds each page's memory. `0` disables it |
 | `OCRMYPDF_EXTRA_ARGS` | — | Appended to the ocrmypdf call |
 | `OCRMYPDF_MAX_OCR_MPIXELS` | `50` | Larger page images are downsampled for OCR only. Peak memory is about jobs × 16 bytes × this value; A4 at 600 dpi is about 35 |
 | `OCRMYPDF_PAGE_TIMEOUT` | `300` | Seconds Tesseract may spend on one page; the page is kept either way |

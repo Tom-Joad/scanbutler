@@ -304,7 +304,7 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend,
                 src,
                 searchable,
                 settings.ocrmypdf_languages,
-                settings.ocrmypdf_jobs,
+                settings.jobs_for(profile),
                 settings.ocrmypdf_extra_args,
                 settings.ocr_limits,
             )
@@ -411,7 +411,7 @@ def process_for_paperless(
                 src,
                 searchable,
                 settings.ocrmypdf_languages,
-                settings.ocrmypdf_jobs,
+                settings.jobs_for(profile),
                 settings.ocrmypdf_extra_args,
                 settings.ocr_limits,
             )

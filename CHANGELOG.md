@@ -4,6 +4,26 @@ All notable changes to this project are listed here. Versions follow
 [semantic versioning](https://semver.org/); while the major version is 0,
 minor versions may change behaviour or settings.
 
+## [0.11.0] - 2026-10-03
+
+### Added
+- `OCRMYPDF_MAX_IMAGE_DPI` (default 600): images sharper than this are
+  downsampled with Ghostscript before OCR. ocrmypdf rasterizes a page at its
+  sharpest image's resolution. A 1550-dpi logo made a 230-megapixel page.
+  Now the page stays at about 35 megapixels, and even the full scan mode
+  handles it.
+- `OCRMYPDF_JOBS=auto` (new default): the number of parallel OCR pages
+  follows the container's memory limit: 1 GB base plus 0.75 GB per page, at
+  most one per CPU core. All inputs share one job budget, and a run that
+  doesn't fit waits. Less memory means slower processing, not failure.
+- README section *System requirements*: 1 GB minimum, 4 GB recommended,
+  with measurements and notes for Synology and similar NAS systems.
+
+### Changed
+- The Unraid template limits the container to 4 GB (`--memory=4g`).
+  `docker-compose.yml` sets `mem_limit: 4g` and keeps temporary files on
+  disk instead of in a RAM-backed `/tmp`.
+
 ## [0.10.0] - 2026-10-03
 
 ### Added
@@ -147,6 +167,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[0.11.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.8.0...v0.9.0
