@@ -105,22 +105,6 @@ token that has the `read:packages` scope.
 
 ## Updating
 
-### From 0.x (scan-stack-splitter) to 1.0
-
-1.0 is a new container: new name, new image, linuxserver.io conventions.
-Install it from the current template as described above, then:
-
-- **Config:** point it at your old work folder (e.g.
-  `/mnt/user/appdata/scan-stack-splitter`) or copy that folder's contents
-  to the new one. It holds the plans for `rebuild` and the list of files
-  already uploaded to Paperless, which prevents duplicate uploads.
-- **Stacks, Scanner, Paperless:** the same paths as before.
-- **Variables:** take over your values (API key, model, rate limit,
-  Paperless, webhook).
-- Remove the old container once the new one runs.
-
-### Regular updates
-
 New versions are published as `ghcr.io/tom-joad/scanbutler:latest`.
 **Check for Updates** on the Docker page pulls them. A container you created
 earlier keeps its settings, so settings added to the template later do not

@@ -5,72 +5,47 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [1.0.0] - unreleased
+## [1.0.0] - 2026-10-03
 
 First stable release. Settings, folder layout, file naming, `plan.json` and
-the webhook payload are now stable, see the versioning note above.
+the webhook payload are now stable, see the versioning note above. Install
+it fresh from the Unraid template or `docker-compose.yml`.
 
-### Changed
-- **The project is now called Scanbutler.** It does far more than splitting
-  stacks, so `scan-stack-splitter` no longer fit. Renamed are the repository
-  (`Tom-Joad/scanbutler`; old links redirect), the image
-  (`ghcr.io/tom-joad/scanbutler`), the command inside the container
-  (`scanbutler` instead of `stacksplit`), the Unraid template
-  (`unraid/scanbutler.xml`) and the default folder names in the templates.
-  Settings, the folder layout inside the container and the work folder are
-  unchanged.
-
-- **linuxserver.io conventions.** The image is built on linuxserver.io's
-  Debian 13 base (s6-overlay) and behaves like their containers: `PUID`,
-  `PGID`, `UMASK` and `TZ` instead of `--user`, the work folder at `/config`
-  instead of `/work` or `/data/work`, and temporary page images in
-  `/config/tmp` without setting `TMPDIR`. `docker exec ... scanbutler`
-  commands run as the `abc` user, so their files get the same owner. Docker
-  mods work as usual. Python is now 3.13.
+### Highlights
+- Three inputs: **stacks** split large scans into documents by content,
+  **scanner** names and OCRs single files, **Paperless** adds the text layer
+  and uploads to Paperless-ngx.
+- Scanner and Paperless files go ahead of stacks, for OCR jobs and for
+  Mistral requests; OCR adapts to the container's memory and CPU limits.
+- **linuxserver.io conventions:** built on their Debian 13 base with
+  s6-overlay; `PUID`, `PGID`, `UMASK` and `TZ`; the work folder at `/config`,
+  temporary page images in `/config/tmp`; `docker exec ... scanbutler` runs
+  as the `abc` user; docker mods work as usual.
 - If the input folders can't be created (wrong `PUID`/`PGID`), the log says
-  so with the IDs in use and the watcher retries every minute, instead of
-  stopping with a traceback. Input folders that Docker created as root are
-  handed to `abc`.
-
-### Upgrading from 0.x
-Set the container up anew, from the current Unraid template or
-`docker-compose.yml`:
-- Image `ghcr.io/tom-joad/scanbutler:latest`. The old image
-  `ghcr.io/tom-joad/scan-stack-splitter` gets no further updates.
-- Map your old work folder to `/config`, or copy its contents there. It
-  holds the plans for `rebuild` and the list of files already uploaded to
-  Paperless, which prevents duplicate uploads.
-- `PUID`/`PGID` instead of `--user` (Unraid: 99/100), and no `--init`.
-  `WORK_DIR` and `TMPDIR` can go.
-- Commands inside the container use `scanbutler` now, for example
-  `docker exec <container> scanbutler rebuild "scanner/<folder>"`.
-
-### Added
+  so with the IDs in use, and the watcher retries every minute.
 - Issue templates for bug reports and feature requests. They ask for log
   lines and settings, never for documents.
-- The Unraid template carries its `TemplateURL`, so Unraid can pick up
-  template changes.
+- The Unraid template carries its `TemplateURL`, so Unraid picks up template
+  changes.
 
 ### Security
-- The image is based on Debian 13 (trixie) instead of Debian 12, pinned by
-  digest, and installs Debian's latest security updates at build time. Known
-  vulnerabilities in the image: critical 11 → 1 (libxml2, no fix yet), with
-  none left that has a fix available.
-- pip is removed from the image after installing the dependencies; the
-  libraries it bundles (urllib3, msgpack, setuptools) had known
-  vulnerabilities. For the tests, `ensurepip` brings it back.
-- Ghostscript downsampling gets the same time limit as ocrmypdf
+- The base image is pinned by digest and gets Debian's latest security
+  updates at build time. The final image contains no pip. At release, no
+  known vulnerability in the image had a fix available.
+- Ghostscript downsampling has the same time limit as ocrmypdf
   (`OCRMYPDF_FILE_TIMEOUT_MINUTES`).
 - Invisible Unicode format characters (such as U+202E, right-to-left
   override) are removed from generated file names, so a name can't display
   differently from what it is.
-- `httpcore` stays at WARNING even with `LOG_LEVEL=DEBUG`, so request URLs,
-  including the webhook URL, never reach the log.
+- Request URLs, including the webhook URL, never reach the log, also with
+  `LOG_LEVEL=DEBUG`.
+- Images for `linux/amd64` and `linux/arm64`, signed with cosign, with SBOM
+  and provenance. GitHub Actions are pinned to commit SHAs.
 
-### CI
-- GitHub Actions updated to their Node 24 releases (setup-python 7,
-  gitleaks-action 3, setup-qemu 4, setup-buildx 4.4.1, login 4.6.0). The
-  secret scan now also works on pull requests, including Dependabot's.
+## 0.x pre-releases
+
+Versions before 1.0 were pre-releases under the name `scan-stack-splitter`.
+They are listed for reference only.
 
 ## [0.12.0] - 2026-10-03
 
@@ -276,7 +251,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
-[1.0.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.12.0...v1.0.0
+[1.0.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v1.0.0
 [0.12.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.10.0...v0.11.0
