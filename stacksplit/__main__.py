@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             "memory_gb": round(memory / 2**30, 1) if memory else None,
             "cpus": available_cpus(),
             "ocr_jobs_total": settings.ocrmypdf_jobs,
-            "ocr_jobs": {p.name: settings.jobs_for(p) for p in settings.profiles},
+            "ocr_priority": [p.name for p in settings.profiles if p.priority],
         },
     )
 

@@ -95,7 +95,7 @@ def test_watcher_pauses_keeps_files_and_resumes_after_probe(settings):
 
     watcher.poll_once()
 
-    # The first file hit the limit; the second was not even tried.
+    # The account refused: every file stays in the inbox, none counts as failed.
     assert gate.paused
     assert sorted(p.name for p in scanner.inbox.iterdir()) == ["a.pdf", "b.pdf"]
     assert not scanner.failed.exists() or not any(scanner.failed.iterdir())

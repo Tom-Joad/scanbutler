@@ -31,7 +31,7 @@ def test_tagged_pdf_is_kept_as_it_is(tmp_path, monkeypatch):
     assert pdfops.is_tagged(src)
     calls = fake_ocrmypdf(monkeypatch, [(0, "")])
 
-    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", 2, "")
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", "")
 
     assert len(calls) == 1 and "--skip-text" in calls[0]
 
@@ -64,7 +64,7 @@ def test_digital_pdf_uses_redo_ocr(tmp_path, monkeypatch):
     make_text_pdf(src, ["Account statement 9/2026"])
     calls = fake_ocrmypdf(monkeypatch, [(0, "")])
 
-    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", 2, "")
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", "")
 
     assert "--redo-ocr" in calls[0] and "--force-ocr" not in calls[0]
     assert "--quiet" not in calls[0]
@@ -76,7 +76,7 @@ def test_failed_mode_falls_back_and_reports_the_real_error(tmp_path, monkeypatch
     stderr = "Start processing\nSubprocessOutputError: unpaper: [Errno 5] Input/output error\n"
     calls = fake_ocrmypdf(monkeypatch, [(7, stderr), (0, "")])
 
-    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", 2, "")
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", "")
 
     assert "--force-ocr" in calls[0] and "--redo-ocr" in calls[1]
     assert (tmp_path / "out.pdf").exists()
@@ -88,7 +88,7 @@ def test_all_modes_failing_raises_with_details(tmp_path, monkeypatch):
     fake_ocrmypdf(monkeypatch, [(7, "Ghostscript: [Errno 28] No space left on device"), (7, "boom"), (6, "boom")])
 
     with pytest.raises(RuntimeError) as failure:
-        pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", 2, "")
+        pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", "")
 
     message = str(failure.value)
     assert "scan: exit code 7" in message and "No space left on device" in message
@@ -102,7 +102,7 @@ def test_limits_are_passed_to_every_mode(tmp_path, monkeypatch):
     calls = fake_ocrmypdf(monkeypatch, [(7, "unpaper died with SIGKILL"), (7, "x"), (0, "")])
     limits = pdfops.OcrLimits(max_ocr_mpixels=40, page_timeout=120, file_timeout_minutes=5, skip_big_mpixels=150)
 
-    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "", limits)
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", "", limits)
 
     for cmd in calls:
         assert cmd[cmd.index("--max-ocr-image-mpixels") + 1] == "40"
@@ -117,7 +117,7 @@ def test_a_run_that_takes_too_long_falls_back(tmp_path, monkeypatch):
     make_pdf(src, 1)
     calls = fake_ocrmypdf(monkeypatch, [("timeout", ""), (0, "")])
 
-    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "", pdfops.OcrLimits(file_timeout_minutes=1))
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", "", pdfops.OcrLimits(file_timeout_minutes=1))
 
     assert len(calls) == 2 and (tmp_path / "out.pdf").exists()
 
@@ -145,7 +145,7 @@ def test_images_above_the_limit_are_downsampled_first(tmp_path, monkeypatch):
     assert round(pdfops.max_image_dpi(src)) == 1550
     calls = fake_ocrmypdf(monkeypatch, [(0, "")])
 
-    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "")
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", "")
 
     gs, ocr = calls
     assert gs[0] == "gs" and "-dColorImageResolution=600" in gs
@@ -158,7 +158,7 @@ def test_normal_scans_are_not_rewritten(tmp_path, monkeypatch):
     image_pdf(src, 600, 300)
     calls = fake_ocrmypdf(monkeypatch, [(0, "")])
 
-    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "")
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", "")
 
     assert len(calls) == 1 and calls[0][0] == "ocrmypdf" and calls[0][-2] == str(src)
 
@@ -168,6 +168,6 @@ def test_downsampling_can_be_switched_off(tmp_path, monkeypatch):
     image_pdf(src, 1550, 1550)
     calls = fake_ocrmypdf(monkeypatch, [(0, "")])
 
-    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "", pdfops.OcrLimits(max_image_dpi=0))
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", "", pdfops.OcrLimits(max_image_dpi=0))
 
     assert [cmd[0] for cmd in calls] == ["ocrmypdf"]

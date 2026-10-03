@@ -19,6 +19,8 @@ from typing import Protocol
 
 import pikepdf
 
+from . import priority
+
 log = logging.getLogger(__name__)
 
 _IMAGE_REF = re.compile(r"!\[[^\]]*\]\([^)]*\)")
@@ -199,7 +201,7 @@ def run_ocr(
         log.info("ocr started", extra={"file": pdf_path.name, "pages": total, "chunks_to_fetch": len(pending)})
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             # list() re-raises the first worker exception here.
-            list(pool.map(work, pending))
+            list(pool.map(priority.keep(work), pending))
 
     pages: list[Page] = []
     for start in starts:

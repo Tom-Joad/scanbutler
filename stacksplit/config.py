@@ -135,6 +135,11 @@ class Profile:
     upload: bool = False
 
     @property
+    def priority(self) -> bool:
+        """Single documents someone is waiting for go ahead of stacks."""
+        return not self.split
+
+    @property
     def uses_mistral(self) -> bool:
         """Whether files of this input call Mistral (and so obey its pause)."""
         # Stacks and scanner always ask the chat model for names; the
@@ -335,14 +340,3 @@ class Settings:
                 return profile
         raise ConfigError(f"profile {name!r} is not enabled")
 
-    def jobs_for(self, profile: Profile) -> int:
-        """This input's share of the OCR jobs; all inputs may run at the same time.
-
-        Scanner and Paperless files are short, so they get one job each and
-        the stacks input gets the rest. Without stacks, the others share.
-        """
-        if "stacks" not in {p.name for p in self.profiles}:
-            return max(1, self.ocrmypdf_jobs // len(self.profiles))
-        if profile.split:
-            return max(1, self.ocrmypdf_jobs - (len(self.profiles) - 1))
-        return 1

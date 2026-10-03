@@ -1,8 +1,10 @@
 """Poll each profile's inbox and process every PDF once it has stopped growing.
 
 Every profile gets its own worker thread: a document from the scanner must
-not wait half an hour behind a 500-page stack. The Mistral client is shared,
-so both workers stay within the same request-rate limit.
+not wait half an hour behind a 500-page stack. The scanner and Paperless
+inputs also work on several files at once; the shared OCR job budget keeps
+that within the container's memory. The Mistral client is shared, so all
+workers stay within the same request-rate limit.
 """
 
 from __future__ import annotations
@@ -13,14 +15,16 @@ import signal
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
+from . import priority
 from .config import Profile, Settings
 from .naming import unique_path
 from .notify import QueueReporter
 from .pause import PauseGate, limit_error_in
 from .paperless import PaperlessClient, PaperlessUnavailable
-from .pipeline import process_for_paperless, process_stack
+from .pipeline import AlreadyInProgress, process_for_paperless, process_stack
 
 log = logging.getLogger(__name__)
 
@@ -84,10 +88,15 @@ class InboxWatcher:
         if self.reporter:
             self.reporter.set_processing(self.profile.name, True)
         try:
-            if self.profile.upload:
-                process_for_paperless(path, folder, self.settings, self.paperless, self.profile, self.backend)
-            else:
-                process_stack(path, folder, self.settings, self.backend, self.profile)
+            with priority.marked(self.profile.priority):
+                if self.profile.upload:
+                    process_for_paperless(path, folder, self.settings, self.paperless, self.profile, self.backend)
+                else:
+                    process_stack(path, folder, self.settings, self.backend, self.profile)
+        except AlreadyInProgress:
+            # Next round it is either a known duplicate or, if the other upload failed, uploaded.
+            log.info("identical file in progress, trying later", extra={"source": (folder / path.name).as_posix()})
+            return
         except PaperlessUnavailable as exc:
             # Not this file's fault: keep it in the inbox and try again later.
             self._retry_after = time.monotonic() + PAPERLESS_RETRY_SECONDS
@@ -122,18 +131,39 @@ class InboxWatcher:
         now = time.monotonic()
         if now < self._retry_after:
             return
-        for path in self._candidates():
-            if self.stop.is_set():
-                return
-            if self._ready(path, now):
-                # Plain Paperless uploads need no Mistral, so a Mistral pause doesn't stop them.
-                if self.profile.uses_mistral and not self.gate.may_process():
+        ready = [path for path in self._candidates() if self._ready(path, now)]
+        if self.profile.priority and len(ready) > 1:
+            self._process_parallel(ready)
+        else:
+            for path in ready:
+                if self.stop.is_set() or not self._may_start():
                     break
                 self.process(path)
                 if now < self._retry_after:
                     break
         # Forget files that vanished from the inbox.
         self._seen = {p: v for p, v in self._seen.items() if p.exists()}
+
+    def _may_start(self) -> bool:
+        # Plain Paperless uploads need no Mistral, so a Mistral pause doesn't stop them.
+        return not self.profile.uses_mistral or self.gate.may_process()
+
+    def _process_parallel(self, ready: list[Path]) -> None:
+        """Work on several scans at once; their OCR shares the job budget."""
+        if self.profile.uses_mistral and self.gate.paused:
+            # One probe on its own first; the rest only once it got through.
+            if not self.gate.may_process():
+                return
+            self.process(ready[0])
+            if self.gate.paused or len(ready) == 1:
+                return
+            ready = ready[1:]
+        with ThreadPoolExecutor(max_workers=min(len(ready), self.settings.ocrmypdf_jobs)) as pool:
+            for path in ready:
+                # While paused, may_process lets exactly one probe through.
+                if self.stop.is_set() or time.monotonic() < self._retry_after or not self._may_start():
+                    break
+                pool.submit(self.process, path)
 
     def run(self) -> None:
         folders = [self.profile.inbox, self.profile.archive, self.profile.failed]

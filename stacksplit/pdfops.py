@@ -6,7 +6,7 @@ import logging
 import shlex
 import subprocess
 import threading
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -118,31 +118,48 @@ class OcrLimits:
 
 
 class JobBudget:
-    """OCR jobs shared by all inputs; a run that doesn't fit waits for one to finish.
+    """OCR jobs shared by all inputs, with priority runs served first.
 
-    Each input runs in its own thread, and each ocrmypdf run starts several
-    jobs, one page each. The budget follows the container's memory, so less
-    memory means waiting, never running out.
+    Each ocrmypdf run starts several jobs, one page each. A run asks for one
+    job per page and gets as many as are free, at least one; with none free it
+    waits. Priority runs (scanner, Paperless) go ahead of every waiting stack
+    run. A running ocrmypdf can't give jobs back, so stacks are OCR'd in short
+    chunks (see make_searchable) and a scan never waits long. The budget
+    follows the container's memory, so less memory means waiting, never
+    running out.
     """
 
     def __init__(self, total: int) -> None:
         self.total = max(1, total)
         self._free = self.total
+        self._priority_waiting = 0
         self._cond = threading.Condition()
 
     @contextmanager
-    def reserve(self, jobs: int):
-        jobs = max(1, min(jobs, self.total))
+    def reserve(self, want: int, priority: bool = False):
+        want = max(1, min(want, self.total))
+
+        def ready() -> bool:
+            return self._free > 0 and (priority or self._priority_waiting == 0)
+
         with self._cond:
-            if self._free < jobs:
-                log.info("waiting for memory budget", extra={"jobs": jobs, "free": self._free})
-            self._cond.wait_for(lambda: self._free >= jobs)
-            self._free -= jobs
+            if not ready():
+                log.info("waiting for ocr jobs", extra={"want": want, "free": self._free, "priority": priority})
+            if priority:
+                self._priority_waiting += 1
+            try:
+                self._cond.wait_for(ready)
+            finally:
+                if priority:
+                    self._priority_waiting -= 1
+                    self._cond.notify_all()  # stacks may go once no priority run waits
+            granted = min(want, self._free)
+            self._free -= granted
         try:
-            yield jobs
+            yield granted
         finally:
             with self._cond:
-                self._free += jobs
+                self._free += granted
                 self._cond.notify_all()
 
 
@@ -220,21 +237,85 @@ def _ocrmypdf_error(returncode: int, stderr: str) -> str:
 
 
 def make_searchable(
-    src: Path, dst: Path, languages: str, jobs: int, extra_args: str, limits: OcrLimits = OcrLimits()
+    src: Path,
+    dst: Path,
+    languages: str,
+    extra_args: str,
+    limits: OcrLimits = OcrLimits(),
+    *,
+    priority: bool = False,
+    chunk_pages: int = 0,
 ) -> None:
     """Add an invisible Tesseract text layer so every output PDF is searchable.
 
     Mistral OCR returns text without word positions, so it cannot place a text
     layer itself; Tesseract only has to be good enough for full-text search.
     If the best mode for the file fails, simpler ones are tried before giving up.
+
+    With `chunk_pages`, a longer file is OCR'd in pieces of that many pages,
+    each with its own share of the job budget, so priority runs can get in
+    between. Finished pieces survive a restart.
     """
-    tmp = dst.with_name(dst.name + ".tmp.pdf")
     try:
+        pages = page_count(src)
         has_text = any(text.strip() for text in page_texts(src))
         tagged = has_text and is_tagged(src)
     except Exception:  # noqa: BLE001 - an unreadable file fails in ocrmypdf with a clearer message
-        has_text = tagged = False
-    log.info("text layer started", extra={"file": src.name, "has_text": has_text, "tagged": tagged})
+        pages, has_text, tagged = 1, False, False
+    # Tagged PDFs only get the quick plain mode, and a piece would lose the tags.
+    if chunk_pages and pages > chunk_pages and not tagged:
+        _searchable_in_chunks(src, dst, languages, extra_args, limits, pages, chunk_pages)
+    else:
+        _searchable(src, src.name, dst, languages, extra_args, limits, priority, pages, has_text, tagged)
+
+
+def _searchable_in_chunks(
+    src: Path, dst: Path, languages: str, extra_args: str, limits: OcrLimits, pages: int, chunk_pages: int
+) -> None:
+    log.info("text layer in chunks", extra={"file": src.name, "pages": pages, "chunk_pages": chunk_pages})
+    parts = []
+    with pikepdf.open(src) as pdf:
+        for start in range(0, pages, chunk_pages):
+            end = min(start + chunk_pages, pages)
+            part = dst.with_name(f"{dst.name}.part{start // chunk_pages:04d}.pdf")
+            parts.append(part)
+            if part.exists():  # done before a restart
+                continue
+            piece = part.with_name(part.name + ".src.pdf")
+            try:
+                out = pikepdf.new()
+                out.pages.extend(pdf.pages[start:end])
+                out.save(piece)
+                has_text = any(text.strip() for text in page_texts(piece))
+                name = f"{src.name} [pages {start + 1}-{end}]"
+                _searchable(piece, name, part, languages, extra_args, limits, False, end - start, has_text, False)
+            finally:
+                piece.unlink(missing_ok=True)
+    tmp = dst.with_name(dst.name + ".tmp.pdf")
+    with ExitStack() as stack:
+        out = pikepdf.new()
+        for part in parts:
+            out.pages.extend(stack.enter_context(pikepdf.open(part)).pages)
+        out.save(tmp)
+    tmp.replace(dst)
+    for part in parts:
+        part.unlink(missing_ok=True)
+
+
+def _searchable(
+    src: Path,
+    name_for_log: str,
+    dst: Path,
+    languages: str,
+    extra_args: str,
+    limits: OcrLimits,
+    priority: bool,
+    pages: int,
+    has_text: bool,
+    tagged: bool,
+) -> None:
+    tmp = dst.with_name(dst.name + ".tmp.pdf")
+    log.info("text layer started", extra={"file": name_for_log, "has_text": has_text, "tagged": tagged})
 
     # Tagged PDFs are not re-OCR'd at all, so they don't need this.
     ocr_input, prepared = src, dst.with_name(dst.name + ".prepared.pdf")
@@ -248,11 +329,11 @@ def make_searchable(
             ocr_input = prepared
             log.info(
                 "images downsampled",
-                extra={"file": src.name, "from_dpi": round(dpi), "to_dpi": limits.max_image_dpi},
+                extra={"file": name_for_log, "from_dpi": round(dpi), "to_dpi": limits.max_image_dpi},
             )
     try:
-        with JOBS.reserve(jobs) as granted:
-            _run_modes(src.name, ocr_input, dst, tmp, languages, granted, extra_args, limits, has_text, tagged)
+        with JOBS.reserve(pages, priority) as granted:
+            _run_modes(name_for_log, ocr_input, dst, tmp, languages, granted, extra_args, limits, has_text, tagged)
     finally:
         prepared.unlink(missing_ok=True)
 

@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Protocol
 
+from . import priority
 from .ocr import Page
 
 log = logging.getLogger(__name__)
@@ -182,7 +183,7 @@ def detect_boundaries(
     log.info("boundary detection started", extra={"pages": count, "windows": len(starts)})
 
     with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        answers = dict(zip(starts, pool.map(lambda s: _ask_window(backend, pages[s : s + window]), starts)))
+        answers = dict(zip(starts, pool.map(priority.keep(lambda s: _ask_window(backend, pages[s : s + window])), starts)))
 
     decisions: list[Decision] = []
     for pos, page in enumerate(pages):

@@ -17,6 +17,8 @@ from typing import Any
 
 import httpx
 
+from . import priority
+
 log = logging.getLogger(__name__)
 
 _RETRY_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
@@ -80,6 +82,10 @@ class MistralClient:
         # panel, so the request rate is a setting; 0 disables the throttle.
         self._min_interval = 1.0 / max_rps if max_rps > 0 else 0.0
         self._next_slot = 0.0
+        # Slots are handed out one at a time, so a scan's request can go
+        # ahead of a stack's requests that are already waiting.
+        self._slot = threading.Condition()
+        self._priority_waiting = 0
 
     def close(self) -> None:
         self._http.close()
@@ -92,12 +98,21 @@ class MistralClient:
                 break
             time.sleep(remaining)
         if self._min_interval:
-            with self._lock:
-                now = time.monotonic()
-                slot = max(now, self._next_slot)
-                self._next_slot = slot + self._min_interval
-            if slot > now:
-                time.sleep(slot - now)
+            first = priority.current()
+            with self._slot:
+                if first:
+                    self._priority_waiting += 1
+                try:
+                    while True:
+                        now = time.monotonic()
+                        if now >= self._next_slot and (first or not self._priority_waiting):
+                            break
+                        self._slot.wait(max(0.01, self._next_slot - now))
+                finally:
+                    if first:
+                        self._priority_waiting -= 1
+                self._next_slot = now + self._min_interval
+                self._slot.notify_all()
 
     def _back_off(self, attempt: int, retry_after: str | None, path: str, reason: object) -> None:
         delay = min(60.0, 2.0**attempt) + random.uniform(0, 1)

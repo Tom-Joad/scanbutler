@@ -29,6 +29,12 @@ scanner/inbox/20261002_141503.pdf
 scanner/output/Insurance renewal notice 2026-09-28.pdf
 ```
 
+This suits Fujitsu (now Ricoh) ScanSnap scanners such as the iX1600 well.
+When they scan straight to a network folder (SMB), they save image-only PDFs:
+the OCR is done by the ScanSnap software on a computer. Point the scanner at
+this inbox, and the files come out searchable and named without any PC
+running.
+
 **Paperless** (optional). Files dropped here only get the Tesseract text
 layer and are then uploaded to [Paperless-ngx](https://docs.paperless-ngx.com/).
 Paperless, or an AI tagger working with it such as
@@ -82,9 +88,18 @@ The container adapts to its memory. With `OCRMYPDF_JOBS=auto`, the default,
 it runs as many OCR pages in parallel as its memory limit allows: 1 GB as a
 base plus 0.75 GB per page. It never runs more than one page per CPU the
 container may use, and Docker's `--cpus` and `--cpuset-cpus` limits are
-respected. All inputs share that budget. A run that doesn't fit waits for
-another to finish. Less memory therefore makes processing slower, never makes
-it fail.
+respected. Less memory therefore makes processing slower, never makes it
+fail.
+
+All inputs share that budget, and scanner and Paperless files go first:
+
+- A file gets one job per page, as many as are free. A two-page scan takes
+  two jobs and leaves the rest to others.
+- When jobs are scarce, waiting scanner and Paperless files are served before
+  stacks. The same goes for requests to Mistral.
+- Stacks get their text layer in pieces of 20 pages. A scan therefore waits
+  for one piece at most, even while a 500-page stack is running.
+- The scanner and Paperless inputs work on several files at once.
 
 Beyond a certain point, more memory no longer helps: the CPUs become the
 limit. Full speed needs about **1 GB + 0.75 GB × CPU cores**, so 5.5 GB for 6
@@ -348,6 +363,8 @@ restart. The payload holds counts only, never file names:
 ```
 
 - `queued` is `waiting + processing`.
+- `processing` can be more than 1: the scanner and Paperless inputs work on
+  several files at once.
 - `failed` counts the PDFs in the `failed/` folders.
 - `profiles` has one entry per enabled input; `paperless` appears only when
   `PAPERLESS_URL` is set.
@@ -530,6 +547,8 @@ on the model and the account tier, and they are not published. Look yours up
 in Mistral's console under **API › Limits** and set `MISTRAL_MAX_RPS` a
 little below the requests-per-second limit of your `MISTRAL_LLM_MODEL`. If a
 request still runs into the limit, all workers pause together and retry.
+Requests for scanner and Paperless files take the next free slot, ahead of
+those for a stack.
 
 Splitting needs one request per 6 pages, and naming one request per document.
 A 500-page stack holding about 200 documents takes roughly 280 requests,

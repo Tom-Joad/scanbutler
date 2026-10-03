@@ -12,12 +12,13 @@ import json
 import logging
 import re
 import shutil
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from . import boundaries, metadata, pdfops
+from . import boundaries, metadata, pdfops, priority
 from .config import Profile, Settings
 from .naming import build_stem, unique_path
 from .llm_cache import CachedChat
@@ -37,6 +38,12 @@ _IMAGE_REF = re.compile(r"!\[[^\]]*\]\([^)]*\)")
 UPLOAD = "paperless_task.json"
 # sha256 of every original handed to Paperless -> document id and date.
 LEDGER = "uploaded.json"
+# Stacks get their text layer in pieces of this many pages, so a scan waits
+# for one piece at most before its own OCR starts.
+CHUNK_PAGES = 20
+_OUTPUT_LOCK = threading.Lock()
+_LEDGER_LOCK = threading.Lock()
+_UPLOADING: set[str] = set()
 
 
 @dataclass
@@ -148,12 +155,12 @@ def build_plan(
     with ThreadPoolExecutor(max_workers=settings.llm_concurrency) as pool:
         described = list(
             pool.map(
-                lambda s: metadata.describe(
+                priority.keep(lambda s: metadata.describe(
                     [p for p in s.pages if not is_blank(p)] or s.pages,
                     backend,
                     settings.title_language,
                     settings.metadata_max_chars,
-                ),
+                )),
                 segments,
             )
         )
@@ -207,6 +214,13 @@ def _retitle(plan: Plan, work: Path, settings: Settings, backend) -> None:
 
 
 def write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
+    # Several scans may finish at once; two "Invoice 2026-10-01" must not
+    # both pick the same free name.
+    with _OUTPUT_LOCK:
+        return _write_outputs(plan, work, settings)
+
+
+def _write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
     output = settings.profile(plan.profile).output
     out_dir = output / plan.folder
     out_root = output.resolve()
@@ -304,9 +318,10 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend,
                 src,
                 searchable,
                 settings.ocrmypdf_languages,
-                settings.jobs_for(profile),
                 settings.ocrmypdf_extra_args,
                 settings.ocr_limits,
+                priority=profile.priority,
+                chunk_pages=0 if profile.priority else CHUNK_PAGES,
             )
         else:
             shutil.copyfile(src, searchable)
@@ -389,17 +404,37 @@ def process_for_paperless(
     file a second time.
     """
     digest = sha256(src)
-    source = (folder / src.name).as_posix()
     ledger = settings.work_dir / profile.name / LEDGER
-    uploaded = json.loads(ledger.read_text(encoding="utf-8")) if ledger.exists() else {}
-    if digest in uploaded:
-        # Paperless's own duplicate check compares the uploaded file, and
-        # ocrmypdf writes a slightly different PDF every run, so it can't
-        # catch a scan that is dropped in twice. This check compares originals.
-        raise PaperlessError(
-            f"this exact file was already uploaded as Paperless document {uploaded[digest]['document']} "
-            f"on {uploaded[digest]['date']}; remove its entry from {LEDGER} to upload it again"
-        )
+    with _LEDGER_LOCK:
+        uploaded = _read_ledger(ledger)
+        if digest in uploaded:
+            # Paperless's own duplicate check compares the uploaded file, and
+            # ocrmypdf writes a slightly different PDF every run, so it can't
+            # catch a scan that is dropped in twice. This check compares originals.
+            raise PaperlessError(
+                f"this exact file was already uploaded as Paperless document {uploaded[digest]['document']} "
+                f"on {uploaded[digest]['date']}; remove its entry from {LEDGER} to upload it again"
+            )
+        if digest in _UPLOADING:
+            raise AlreadyInProgress("an identical file is being uploaded right now")
+        _UPLOADING.add(digest)
+    try:
+        return _upload(src, folder, settings, client, profile, backend, digest, ledger)
+    finally:
+        with _LEDGER_LOCK:
+            _UPLOADING.discard(digest)
+
+
+class AlreadyInProgress(Exception):
+    """An identical file is being worked on; this one waits for the next round."""
+
+
+def _read_ledger(ledger: Path) -> dict:
+    return json.loads(ledger.read_text(encoding="utf-8")) if ledger.exists() else {}
+
+
+def _upload(src, folder, settings, client, profile, backend, digest: str, ledger: Path) -> int | None:
+    source = (folder / src.name).as_posix()
     work = work_dir_for(settings, profile, folder, src, digest)
     work.mkdir(parents=True, exist_ok=True)
     log.info("paperless started", extra={"source": source})
@@ -411,9 +446,10 @@ def process_for_paperless(
                 src,
                 searchable,
                 settings.ocrmypdf_languages,
-                settings.jobs_for(profile),
                 settings.ocrmypdf_extra_args,
                 settings.ocr_limits,
+                priority=profile.priority,
+                chunk_pages=0 if profile.priority else CHUNK_PAGES,
             )
         else:
             shutil.copyfile(src, searchable)
@@ -454,10 +490,12 @@ def process_for_paperless(
             # The document exists either way; uploading again would only
             # create a duplicate. Keep Tesseract's content and say so.
             log.warning("paperless content not replaced", extra={"document": document, "error": str(exc)[:300]})
-    uploaded[digest] = {"document": document, "file": source, "date": date.today().isoformat()}
-    tmp = ledger.with_suffix(".tmp")
-    tmp.write_text(json.dumps(uploaded, ensure_ascii=False, indent=1), encoding="utf-8")
-    tmp.replace(ledger)
+    with _LEDGER_LOCK:  # re-read: other uploads may have finished meanwhile
+        uploaded = _read_ledger(ledger)
+        uploaded[digest] = {"document": document, "file": source, "date": date.today().isoformat()}
+        tmp = ledger.with_suffix(".tmp")
+        tmp.write_text(json.dumps(uploaded, ensure_ascii=False, indent=1), encoding="utf-8")
+        tmp.replace(ledger)
     # Nothing left to review: the work copy would only duplicate the document.
     shutil.rmtree(work, ignore_errors=True)
     return document

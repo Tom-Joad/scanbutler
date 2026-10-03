@@ -4,6 +4,26 @@ All notable changes to this project are listed here. Versions follow
 [semantic versioning](https://semver.org/); while the major version is 0,
 minor versions may change behaviour or settings.
 
+## [0.12.0] - 2026-10-03
+
+### Changed
+- **Scanner and Paperless files go ahead of stacks.** The OCR jobs are one
+  shared budget without fixed shares: a file gets one job per page, as many
+  as are free, and waiting scanner and Paperless files are served first.
+  Before, they had one job each, however many were idle.
+- Stacks get their text layer in pieces of 20 pages, so a scan waits for one
+  piece at most while a long stack runs. Finished pieces survive a restart.
+- Requests to Mistral for scanner and Paperless files take the next free
+  slot of `MISTRAL_MAX_RPS`, ahead of waiting stack requests.
+- The scanner and Paperless inputs work on several files at once. The queue
+  webhook's `processing` can therefore be more than 1.
+- The startup log shows `ocr_priority` instead of the fixed `ocr_jobs` shares.
+
+### Docs
+- A note on Fujitsu/Ricoh ScanSnap scanners: scanning straight to a network
+  folder, they save image-only PDFs, and the scanner input makes them
+  searchable without a PC.
+
 ## [0.11.1] - 2026-10-03
 
 ### Fixed
@@ -179,6 +199,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[0.12.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.9.1...v0.10.0

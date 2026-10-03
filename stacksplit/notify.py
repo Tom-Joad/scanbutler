@@ -63,7 +63,7 @@ class QueueReporter:
     heartbeat_seconds: float = 300.0
     timeout: float = 10.0
     gate: PauseGate | None = None
-    _processing: dict[str, bool] = field(default_factory=dict)
+    _processing: dict[str, int] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _last_sent: dict | None = None
     _last_time: float = 0.0
@@ -71,8 +71,9 @@ class QueueReporter:
     _last_error_time: float = 0.0
 
     def set_processing(self, profile: str, busy: bool) -> None:
+        """One file of this input started (True) or ended (False); several may run at once."""
         with self._lock:
-            self._processing[profile] = busy
+            self._processing[profile] = max(0, self._processing.get(profile, 0) + (1 if busy else -1))
 
     def snapshot(self) -> dict:
         per_profile = {}
@@ -80,8 +81,8 @@ class QueueReporter:
             busy = dict(self._processing)
         for profile in self.profiles:
             in_inbox = count_pdfs(profile.inbox)
-            # The file being worked on stays in the inbox until it is done.
-            processing = 1 if busy.get(profile.name) and in_inbox else 0
+            # Files being worked on stay in the inbox until they are done.
+            processing = min(busy.get(profile.name, 0), in_inbox)
             per_profile[profile.name] = {
                 "waiting": in_inbox - processing,
                 "processing": processing,

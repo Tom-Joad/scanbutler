@@ -19,23 +19,6 @@ def test_unknown_memory_stays_modest():
     assert auto_jobs(None, 12) == 4
 
 
-def test_jobs_are_shared_between_inputs(monkeypatch):
-    monkeypatch.setenv("MISTRAL_API_KEY", "x")
-    monkeypatch.setenv("OCRMYPDF_JOBS", "6")
-    settings = Settings.from_env()
-    assert {p.name: settings.jobs_for(p) for p in settings.profiles} == {"stacks": 5, "scanner": 1}
-
-    monkeypatch.setenv("PAPERLESS_URL", "http://p:8000")
-    monkeypatch.setenv("PAPERLESS_TOKEN", "t")
-    settings = Settings.from_env()
-    assert {p.name: settings.jobs_for(p) for p in settings.profiles} == {"stacks": 4, "scanner": 1, "paperless": 1}
-    assert sum(settings.jobs_for(p) for p in settings.profiles) == 6
-
-    monkeypatch.setenv("STACKS_ENABLED", "false")
-    settings = Settings.from_env()
-    assert {p.name: settings.jobs_for(p) for p in settings.profiles} == {"scanner": 3, "paperless": 3}
-
-
 def test_jobs_setting_accepts_auto(monkeypatch):
     monkeypatch.setenv("MISTRAL_API_KEY", "x")
     monkeypatch.setenv("OCRMYPDF_JOBS", "auto")
