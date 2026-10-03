@@ -16,6 +16,7 @@ interface; everything it does shows up in the container log.
    |---|---|
    | Stacks | e.g. `/mnt/user/<share>/scan-splitter/stacks` |
    | Scanner | e.g. `/mnt/user/<share>/scan-splitter/scanner` |
+   | Paperless | optional, e.g. `/mnt/user/<share>/scan-splitter/paperless` |
    | Work | `/mnt/user/appdata/scan-stack-splitter` |
    | `MISTRAL_API_KEY` | your key (masked in the UI) |
    | `MISTRAL_LLM_MODEL` | `mistral-large-latest`, or a pinned version such as `mistral-large-2512` |
@@ -23,6 +24,7 @@ interface; everything it does shows up in the container log.
    | `TITLE_LANGUAGE` | e.g. `English`; leave empty to use each document's language |
    | `NO_DATE_LABEL` | the word used when a document has no date, e.g. `undated` |
    | `OCRMYPDF_JOBS` | leave some cores for the rest of the server |
+   | `PAPERLESS_URL`, `PAPERLESS_TOKEN` | optional, enable the Paperless input; see below |
    | `QUEUE_WEBHOOK_URL` | optional, e.g. a Home Assistant webhook; see the [main README](../README.md#queue-webhook-home-assistant) |
 
    The advanced view has the remaining settings. Leave `WORK_DIR` and
@@ -67,6 +69,21 @@ token that has the `read:packages` scope.
 - The SMB user the scanner logs in with needs write access to
   `scanner/inbox/`. The container reads and moves the files as
   `nobody:users`.
+
+### Paperless
+
+- With `PAPERLESS_URL` and `PAPERLESS_TOKEN` set, files in `paperless/inbox/`
+  get the text layer and are uploaded to Paperless-ngx. Paperless, or its AI
+  tagger, does the naming and tagging.
+- `PAPERLESS_URL` must be reachable from inside the container. For a
+  Paperless container on the same server, that is usually
+  `http://<server-ip>:8000`. `localhost` does not work, because it would
+  point at this container itself.
+- Create the token in Paperless under *My Profile → API Auth Token*, for the
+  user that should own the documents.
+- If Paperless is down, files wait in the inbox and are retried every 5
+  minutes. A file that was already uploaded once is not uploaded again; it
+  moves to `failed/` with the Paperless document number.
 
 ### Failures and pauses
 

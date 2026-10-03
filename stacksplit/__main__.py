@@ -11,7 +11,8 @@ from pathlib import Path, PurePosixPath
 from . import __version__, logging_setup
 from .config import ConfigError, Settings
 from .mistral import MistralClient
-from .pipeline import process_stack, rebuild
+from .paperless import PaperlessClient
+from .pipeline import process_for_paperless, process_stack, rebuild
 from .watcher import run_all
 
 log = logging.getLogger("stacksplit")
@@ -36,7 +37,12 @@ def main(argv: list[str] | None = None) -> int:
     one = sub.add_parser("process", help="process a single PDF without moving it")
     one.add_argument("pdf", type=Path)
     one.add_argument("--folder", default="", help="output sub-folder (default: none)")
-    one.add_argument("--profile", default="stacks", choices=["stacks", "scanner"], help="stacks: split; scanner: one document per file")
+    one.add_argument(
+        "--profile",
+        default="stacks",
+        choices=["stacks", "scanner", "paperless"],
+        help="stacks: split; scanner: one document per file; paperless: text layer, then upload",
+    )
     again = sub.add_parser("rebuild", help="re-cut a stack from its edited plan.json")
     again.add_argument("work_dir", help="the stack's work directory, absolute or relative to WORK_DIR")
     args = parser.parse_args(argv)
@@ -70,8 +76,16 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if command == "process":
             profile = settings.profile(args.profile)
-            profile.output.mkdir(parents=True, exist_ok=True)
-            process_stack(args.pdf, PurePosixPath(args.folder), settings, client, profile)
+            if profile.upload:
+                paperless = PaperlessClient(settings.paperless_url, settings.paperless_token)
+                try:
+                    document = process_for_paperless(args.pdf, PurePosixPath(args.folder), settings, paperless, profile)
+                finally:
+                    paperless.close()
+                print(f"Paperless document {document}")
+            else:
+                profile.output.mkdir(parents=True, exist_ok=True)
+                process_stack(args.pdf, PurePosixPath(args.folder), settings, client, profile)
         else:
             run_all(settings, client)
     finally:

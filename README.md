@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Turn scanned paper into searchable PDFs, one per document, named after their
-content. It runs as a Docker container that watches two folders.
+content. It runs as a Docker container that watches up to three folders.
 
 **Stacks.** Drop a scan of a whole pile of paper, with hundreds of pages and
 no separator sheets. The container finds where each document begins from the
@@ -29,6 +29,15 @@ scanner/inbox/20261002_141503.pdf
 scanner/output/Insurance renewal notice 2026-09-28.pdf
 ```
 
+**Paperless** (optional). Files dropped here only get the Tesseract text
+layer and are then uploaded to [Paperless-ngx](https://docs.paperless-ngx.com/).
+Paperless, or an AI tagger working with it, takes care of the title, tags and
+correspondent:
+
+```
+paperless/inbox/scan.pdf  →  text layer  →  Paperless-ngx document #1234
+```
+
 Titles are written in the language of each document unless you set
 `TITLE_LANGUAGE`.
 
@@ -51,6 +60,7 @@ Under the hood:
 - [Queue webhook (Home Assistant)](#queue-webhook-home-assistant)
 - [Spending limit and paused processing](#spending-limit-and-paused-processing)
 - [Choosing the text source](#choosing-the-text-source)
+- [Paperless-ngx input](#paperless-ngx-input)
 - [Rate limits and cost](#rate-limits-and-cost)
 - [Privacy](#privacy)
 - [Unraid](#unraid)
@@ -74,8 +84,9 @@ local build, see `docker-compose.yml`.
 On first start, the container creates this layout under `DATA_PATH`:
 
 ```
-stacks/   inbox/  output/  archive/  failed/
-scanner/  inbox/  output/  archive/  failed/
+stacks/     inbox/  output/  archive/  failed/
+scanner/    inbox/  output/  archive/  failed/
+paperless/  inbox/          archive/  failed/    (only with PAPERLESS_URL set)
 work/
 ```
 
@@ -192,6 +203,16 @@ them with comments.
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
 | `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up |
 
+**Paperless-ngx input**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PAPERLESS_URL` | — | Base URL of Paperless-ngx, e.g. `http://paperless:8000`; setting it enables the input |
+| `PAPERLESS_TOKEN` | — | API token of the Paperless user that should own the documents |
+| `PAPERLESS_DIR` | `$DATA_DIR/paperless` | Root of the input; `inbox/`, `archive/` and `failed/` live below it |
+| `PAPERLESS_TAGS` | — | Comma-separated tag ids to add on upload, e.g. `3,7` |
+| `PAPERLESS_MAX_WAIT_MINUTES` | `30` | How long to wait for Paperless to consume a file before trying again later |
+
 **Naming**
 
 | Variable | Default | Purpose |
@@ -251,6 +272,8 @@ restart. The payload holds counts only, never file names:
 
 - `queued` is `waiting + processing`.
 - `failed` counts the PDFs in the `failed/` folders.
+- `profiles` has one entry per enabled input; `paperless` appears only when
+  `PAPERLESS_URL` is set.
 - `paused`, `pause_reason` and `paused_since` are always present. The last
   two are `null` unless processing is paused. `pause_reason` is Mistral's
   raw error text, up to 300 characters. `paused_since` is an ISO 8601
@@ -349,6 +372,45 @@ scanner files, the difference was not measurable. That is why the defaults
 are what they are. If your scanner files are handwritten or of poor quality,
 `SCANNER_TEXT_SOURCE=mistral` may be worth the cost.
 
+## Paperless-ngx input
+
+Set `PAPERLESS_URL` and `PAPERLESS_TOKEN` to enable a third inbox,
+`paperless/inbox/`. It is meant for documents that Paperless-ngx should name
+and tag itself, for example with an AI tagger. For each file:
+
+1. ocrmypdf adds the Tesseract text layer, with the same settings as for the
+   other inputs. Neither Mistral nor any other paid service is involved.
+2. The PDF is uploaded through `POST /api/documents/post_document/`, keeping
+   its file name and adding `PAPERLESS_TAGS`, if set.
+3. The container follows Paperless's consumption task until a document has
+   been created. Only then does the original move to `archive/`, and the work
+   copy is deleted.
+
+Failure handling:
+
+- **Paperless unreachable, or token rejected.** The file stays in the inbox,
+  and the input retries after 5 minutes. A file that is still being consumed
+  is not uploaded a second time after a restart: the task id is stored.
+- **Paperless rejects the document**, for example as a duplicate. The file
+  moves to `failed/` with Paperless's message in the `.error.txt`.
+- **The same original dropped in twice.** The file moves to `failed/` and
+  names the Paperless document it already became. Paperless's own duplicate
+  check cannot catch this, because the text layer makes every upload a
+  slightly different file. The container therefore keeps a register of
+  uploaded originals in `work/paperless/uploaded.json`. Remove an entry there
+  to upload that file again.
+
+Paperless decides by itself whether to run its own OCR. With the default
+`PAPERLESS_OCR_MODE=auto`, it keeps the text layer added here. With `redo`
+or `force`, it replaces it.
+
+Sub-folders in `paperless/inbox/` are allowed and mirrored in `archive/`, but
+Paperless itself doesn't see them. Use `PAPERLESS_TAGS`, or Paperless
+workflows, to sort documents.
+
+Tested with Paperless-ngx 3.2. The task format of version 2 is supported as
+well.
+
 ## Rate limits and cost
 
 Mistral limits requests per second and tokens per minute. The limits depend
@@ -379,6 +441,9 @@ health or financial records.
   no automatic cleanup, so delete a file's work directory once its documents
   are fine.
 - Logs contain file names, page numbers and counts, never document text.
+- The Paperless input keeps no copy once a document is confirmed in
+  Paperless. Only the register of uploaded originals remains: checksum, file
+  name, document id and date.
 - The queue webhook sends counts only.
 
 ## Unraid

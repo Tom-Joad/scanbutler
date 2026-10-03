@@ -4,6 +4,22 @@ All notable changes to this project are listed here. Versions follow
 [semantic versioning](https://semver.org/); while the major version is 0,
 minor versions may change behaviour or settings.
 
+## [0.7.0] - 2026-10-03
+
+### Added
+- Optional Paperless-ngx input (`PAPERLESS_URL`, `PAPERLESS_TOKEN`,
+  `PAPERLESS_DIR`, `PAPERLESS_TAGS`, `PAPERLESS_MAX_WAIT_MINUTES`). Files in
+  `paperless/inbox/` get the Tesseract text layer and are uploaded to
+  Paperless. Paperless, or an AI tagger, names and tags them.
+  - A file counts as done only once Paperless confirms the new document.
+  - If Paperless is unreachable, files wait in the inbox.
+  - A rejected document goes to `failed/` with Paperless's message.
+  - A register of uploaded originals stops the same scan from being uploaded
+    twice.
+  - Supports the task formats of Paperless-ngx 2 and 3.
+- `stacksplit process --profile paperless`.
+- The Unraid template has a Paperless path and settings.
+
 ## [0.6.0] - 2026-10-02
 
 ### Added
@@ -79,6 +95,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[0.7.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.3.1...v0.4.0

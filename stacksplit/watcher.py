@@ -19,11 +19,13 @@ from .config import Profile, Settings
 from .naming import unique_path
 from .notify import QueueReporter
 from .pause import PauseGate, limit_error_in
-from .pipeline import process_stack
+from .paperless import PaperlessClient, PaperlessUnavailable
+from .pipeline import process_for_paperless, process_stack
 
 log = logging.getLogger(__name__)
 
 HEARTBEAT = Path("/tmp/stacksplit.heartbeat")
+PAPERLESS_RETRY_SECONDS = 300
 
 
 class InboxWatcher:
@@ -35,6 +37,7 @@ class InboxWatcher:
         stop: threading.Event,
         reporter: QueueReporter | None = None,
         gate: PauseGate | None = None,
+        paperless=None,
     ) -> None:
         self.settings = settings
         self.profile = profile
@@ -42,6 +45,9 @@ class InboxWatcher:
         self.stop = stop
         self.reporter = reporter
         self.gate = gate or PauseGate(settings.pause_retry_minutes * 60)
+        self.paperless = paperless
+        # While Paperless is unreachable, files wait in the inbox until then.
+        self._retry_after = 0.0
         # path -> (size, mtime_ns, monotonic time the file last changed)
         self._seen: dict[Path, tuple[int, int, float]] = {}
 
@@ -78,21 +84,34 @@ class InboxWatcher:
         if self.reporter:
             self.reporter.set_processing(self.profile.name, True)
         try:
-            process_stack(path, folder, self.settings, self.backend, self.profile)
+            if self.profile.upload:
+                process_for_paperless(path, folder, self.settings, self.paperless, self.profile)
+            else:
+                process_stack(path, folder, self.settings, self.backend, self.profile)
+        except PaperlessUnavailable as exc:
+            # Not this file's fault: keep it in the inbox and try again later.
+            self._retry_after = time.monotonic() + PAPERLESS_RETRY_SECONDS
+            log.warning(
+                "paperless unavailable, retrying later",
+                extra={"error": str(exc)[:300], "retry_minutes": PAPERLESS_RETRY_SECONDS // 60},
+            )
+            return
         except Exception as exc:  # noqa: BLE001 - one bad file must not stop the watcher
             if limit := limit_error_in(exc):
                 # Not this file's fault: leave it in the inbox and stop
                 # sending more until the account accepts work again.
                 self.gate.pause(str(limit))
                 return
-            self.gate.done()
+            if not self.profile.upload:  # a Paperless upload says nothing about Mistral
+                self.gate.done()
             log.exception("stack failed", extra={"profile": self.profile.name, "source": (folder / path.name).as_posix()})
             target = self._move(path, self.profile.failed, folder)
             target.with_name(target.name + ".error.txt").write_text(
                 f"{type(exc).__name__}: {exc}\n\n{traceback.format_exc()}", encoding="utf-8"
             )
         else:
-            self.gate.done()
+            if not self.profile.upload:
+                self.gate.done()
             self._move(path, self.profile.archive, folder)
         finally:
             self._seen.pop(path, None)
@@ -101,18 +120,26 @@ class InboxWatcher:
 
     def poll_once(self) -> None:
         now = time.monotonic()
+        if now < self._retry_after:
+            return
         for path in self._candidates():
             if self.stop.is_set():
                 return
             if self._ready(path, now):
-                if not self.gate.may_process():
+                # Paperless uploads need no Mistral, so a Mistral pause doesn't stop them.
+                if not self.profile.upload and not self.gate.may_process():
                     break
                 self.process(path)
+                if now < self._retry_after:
+                    break
         # Forget files that vanished from the inbox.
         self._seen = {p: v for p, v in self._seen.items() if p.exists()}
 
     def run(self) -> None:
-        for directory in (self.profile.inbox, self.profile.output, self.profile.archive, self.profile.failed):
+        folders = [self.profile.inbox, self.profile.archive, self.profile.failed]
+        if not self.profile.upload:
+            folders.append(self.profile.output)
+        for directory in folders:
             directory.mkdir(parents=True, exist_ok=True)
         log.info("watching inbox", extra={"profile": self.profile.name, "inbox": str(self.profile.inbox)})
         while not self.stop.is_set():
@@ -148,9 +175,12 @@ def run_all(settings: Settings, backend) -> None:
         threading.Thread(target=reporter.run, args=(stop,), name="queue-webhook", daemon=True).start()
         log.info("queue webhook enabled", extra={"heartbeat_s": settings.queue_webhook_heartbeat_seconds})
 
+    paperless = PaperlessClient(settings.paperless_url, settings.paperless_token) if settings.paperless_url else None
     workers = [
         threading.Thread(
-            target=InboxWatcher(settings, profile, backend, stop, reporter, gate).run, name=profile.name, daemon=True
+            target=InboxWatcher(settings, profile, backend, stop, reporter, gate, paperless).run,
+            name=profile.name,
+            daemon=True,
         )
         for profile in settings.profiles
     ]

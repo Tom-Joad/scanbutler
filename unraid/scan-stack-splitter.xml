@@ -14,13 +14,15 @@
     content. The Scanner input takes files from a document scanner, one document per file, and
     gives them the same OCR and naming. Uses Mistral OCR (batch API) and a Mistral chat model;
     the text layer comes from a fresh Tesseract pass. No web UI: progress is in the container
-    log, and a review.md per stack in the Work folder lists uncertain splits. Optionally reports
-    the queue to a webhook such as Home Assistant. Needs a Mistral API key.
+    log, and a review.md per stack in the Work folder lists uncertain splits. An optional third
+    input only adds the text layer and uploads to Paperless-ngx. Optionally reports the queue to
+    a webhook such as Home Assistant. Needs a Mistral API key.
   </Overview>
   <Category>Productivity: Tools:</Category>
   <ExtraParams>--init --user 99:100 --security-opt no-new-privileges</ExtraParams>
   <Config Name="Stacks" Target="/data/stacks" Default="/mnt/user/Documents/scan-stack-splitter/stacks" Mode="rw" Description="Large scans to split. inbox/, output/, archive/ and failed/ are created here." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="Scanner" Target="/data/scanner" Default="/mnt/user/Documents/scan-stack-splitter/scanner" Mode="rw" Description="Scanner input, one document per file. Point the scanner's network-folder target at inbox/ below this path." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Paperless" Target="/data/paperless" Default="/mnt/user/Documents/scan-stack-splitter/paperless" Mode="rw" Description="Optional Paperless-ngx input (needs PAPERLESS_URL): files get the text layer and are uploaded to Paperless." Type="Path" Display="always" Required="false" Mask="false"/>
   <Config Name="Work" Target="/work" Default="/mnt/user/appdata/scan-stack-splitter" Mode="rw" Description="Per-stack OCR text, plan.json, review.md and temporary page images (several GB while a large stack is processed). Holds full document text: delete stacks you no longer need." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="MISTRAL_API_KEY" Target="MISTRAL_API_KEY" Default="" Mode="" Description="Mistral API key" Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="MISTRAL_LLM_MODEL" Target="MISTRAL_LLM_MODEL" Default="mistral-large-latest" Mode="" Description="Model for splitting and naming" Type="Variable" Display="always" Required="false" Mask="false"/>
@@ -28,6 +30,9 @@
   <Config Name="TITLE_LANGUAGE" Target="TITLE_LANGUAGE" Default="" Mode="" Description="Language for document titles, e.g. German. Empty: the language of each document." Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="NO_DATE_LABEL" Target="NO_DATE_LABEL" Default="undated" Mode="" Description="Used in the file name when a document has no date" Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="OCRMYPDF_JOBS" Target="OCRMYPDF_JOBS" Default="4" Mode="" Description="CPU cores for the Tesseract text layer" Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="PAPERLESS_URL" Target="PAPERLESS_URL" Default="" Mode="" Description="Optional: Paperless-ngx base URL, e.g. http://NAS-IP:8000. Enables the Paperless input." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="PAPERLESS_TOKEN" Target="PAPERLESS_TOKEN" Default="" Mode="" Description="API token of the Paperless user that should own the uploaded documents" Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="PAPERLESS_TAGS" Target="PAPERLESS_TAGS" Default="" Mode="" Description="Optional: comma-separated Paperless tag ids to add on upload, e.g. 3,7" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="QUEUE_WEBHOOK_URL" Target="QUEUE_WEBHOOK_URL" Default="" Mode="" Description="Optional: POST queue counts here on every change and every 5 minutes, e.g. a Home Assistant webhook (http://HA:8123/api/webhook/ID). See the project README for the sensor config." Type="Variable" Display="always" Required="false" Mask="true"/>
   <Config Name="STACKS_TEXT_SOURCE" Target="STACKS_TEXT_SOURCE" Default="mistral" Mode="" Description="Text for splitting and naming stacks: mistral (Mistral OCR, paid) or tesseract (free, from the text layer)" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="SCANNER_TEXT_SOURCE" Target="SCANNER_TEXT_SOURCE" Default="tesseract" Mode="" Description="Text for naming scanner files: tesseract (free, from the text layer) or mistral (Mistral OCR, paid; worth it for handwriting or poor scans)" Type="Variable" Display="advanced" Required="false" Mask="false"/>

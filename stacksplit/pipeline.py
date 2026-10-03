@@ -13,6 +13,7 @@ import logging
 import shutil
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+from datetime import date
 from pathlib import Path, PurePosixPath
 
 from . import boundaries, metadata, pdfops
@@ -20,6 +21,7 @@ from .config import Profile, Settings
 from .naming import build_stem, unique_path
 from .llm_cache import CachedChat
 from .ocr import BatchOptions, Page, run_ocr
+from .paperless import PaperlessError, PaperlessUnavailable, task_document_id, task_message, task_status
 from .plan import Plan, PlannedDocument, format_pages, parse_pages
 
 log = logging.getLogger(__name__)
@@ -30,6 +32,9 @@ REVIEW = "review.md"
 INK = "ink.json"
 DECISIONS = "decisions.json"
 LLM_CACHE = "llm"
+UPLOAD = "paperless_task.json"
+# sha256 of every original handed to Paperless -> document id and date.
+LEDGER = "uploaded.json"
 
 
 @dataclass
@@ -348,3 +353,65 @@ def rebuild(work: Path, settings: Settings, backend) -> list[Path]:
     written = write_outputs(plan, work, settings)
     log.info("stack rebuilt", extra={"source": plan.source, "documents": len(written)})
     return written
+
+
+def process_for_paperless(src: Path, folder: PurePosixPath, settings: Settings, client, profile: Profile) -> int | None:
+    """Add the Tesseract text layer and hand the file to Paperless-ngx.
+
+    Returns the new Paperless document id. The task id is stored right after
+    the upload, so a restart waits for that task instead of uploading the
+    file a second time.
+    """
+    digest = sha256(src)
+    source = (folder / src.name).as_posix()
+    ledger = settings.work_dir / profile.name / LEDGER
+    uploaded = json.loads(ledger.read_text(encoding="utf-8")) if ledger.exists() else {}
+    if digest in uploaded:
+        # Paperless's own duplicate check compares the uploaded file, and
+        # ocrmypdf writes a slightly different PDF every run, so it can't
+        # catch a scan that is dropped in twice. This check compares originals.
+        raise PaperlessError(
+            f"this exact file was already uploaded as Paperless document {uploaded[digest]['document']} "
+            f"on {uploaded[digest]['date']}; remove its entry from {LEDGER} to upload it again"
+        )
+    work = work_dir_for(settings, profile, folder, src, digest)
+    work.mkdir(parents=True, exist_ok=True)
+    log.info("paperless started", extra={"source": source})
+
+    searchable = work / SEARCHABLE
+    if not searchable.exists():
+        if settings.ocrmypdf_enabled:
+            pdfops.make_searchable(
+                src, searchable, settings.ocrmypdf_languages, settings.ocrmypdf_jobs, settings.ocrmypdf_extra_args
+            )
+        else:
+            shutil.copyfile(src, searchable)
+
+    state = work / UPLOAD
+    if state.exists():
+        task_id = json.loads(state.read_text(encoding="utf-8"))["task_id"]
+        log.info("paperless upload resumed", extra={"source": source, "task": task_id})
+    else:
+        task_id = client.upload(searchable, src.name, list(settings.paperless_tags))
+        state.write_text(json.dumps({"task_id": task_id}), encoding="utf-8")
+        log.info("paperless uploaded", extra={"source": source, "task": task_id})
+
+    task = client.wait(task_id, 5, settings.paperless_max_wait_minutes * 60)
+    if task is None:
+        # Still queued in Paperless. Leave everything in place; the next try
+        # resumes waiting for the same task.
+        raise PaperlessUnavailable(f"consumption of task {task_id} not finished yet")
+    if task_status(task) != "SUCCESS":
+        # A later retry (e.g. after deleting a duplicate) must upload again.
+        state.unlink(missing_ok=True)
+        raise PaperlessError(f"Paperless did not consume the file: {task_message(task)}")
+
+    document = task_document_id(task)
+    log.info("paperless document created", extra={"source": source, "document": document})
+    uploaded[digest] = {"document": document, "file": source, "date": date.today().isoformat()}
+    tmp = ledger.with_suffix(".tmp")
+    tmp.write_text(json.dumps(uploaded, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(ledger)
+    # Nothing left to review: the work copy would only duplicate the document.
+    shutil.rmtree(work, ignore_errors=True)
+    return document

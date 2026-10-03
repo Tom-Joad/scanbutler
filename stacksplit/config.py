@@ -68,6 +68,8 @@ class Profile:
     # Where the text for splitting and naming comes from: "mistral" (Mistral
     # OCR, paid) or "tesseract" (the text layer ocrmypdf adds anyway, free).
     text_source: str = "mistral"
+    # Hand the result to Paperless-ngx instead of writing it to output/.
+    upload: bool = False
 
     @property
     def inbox(self) -> Path:
@@ -126,6 +128,10 @@ class Settings:
     ocrmypdf_extra_args: str
 
     pause_retry_minutes: float
+    paperless_url: str
+    paperless_token: str
+    paperless_tags: tuple[int, ...]
+    paperless_max_wait_minutes: float
     queue_webhook_url: str
     queue_webhook_check_seconds: int
     queue_webhook_heartbeat_seconds: int
@@ -167,12 +173,26 @@ class Settings:
             for name, split, default_source in (("stacks", True, "mistral"), ("scanner", False, scanner_default))
             if _bool(f"{name.upper()}_ENABLED", True)
         ]
+        paperless_url = os.environ.get("PAPERLESS_URL", "").strip()
+        paperless_token = os.environ.get("PAPERLESS_TOKEN", "").strip()
+        if paperless_url:
+            if not paperless_token:
+                raise ConfigError("PAPERLESS_URL is set but PAPERLESS_TOKEN is not")
+            # Paperless (and an AI tagger behind it) does the naming and
+            # tagging; this input only adds the Tesseract text layer.
+            profiles.append(
+                Profile("paperless", Path(_str("PAPERLESS_DIR", str(data / "paperless"))), False, "tesseract", True)
+            )
+        try:
+            paperless_tags = [int(t) for t in os.environ.get("PAPERLESS_TAGS", "").replace(" ", "").split(",") if t]
+        except ValueError as exc:
+            raise ConfigError("PAPERLESS_TAGS must be comma-separated tag ids, e.g. 3,7") from exc
         for profile in profiles:
             if profile.text_source not in {"mistral", "tesseract"}:
                 raise ConfigError(
                     f"{profile.name.upper()}_TEXT_SOURCE must be mistral or tesseract, got {profile.text_source!r}"
                 )
-            if profile.text_source == "tesseract" and not _bool("OCRMYPDF_ENABLED", True):
+            if profile.text_source == "tesseract" and not profile.upload and not _bool("OCRMYPDF_ENABLED", True):
                 raise ConfigError(f"{profile.name.upper()}_TEXT_SOURCE=tesseract needs OCRMYPDF_ENABLED=true")
         if not profiles:
             raise ConfigError("STACKS_ENABLED and SCANNER_ENABLED are both off")
@@ -209,6 +229,10 @@ class Settings:
             ocrmypdf_jobs=_int("OCRMYPDF_JOBS", os.cpu_count() or 1, minimum=1),
             ocrmypdf_extra_args=os.environ.get("OCRMYPDF_EXTRA_ARGS", "").strip(),
             pause_retry_minutes=_float("PAUSE_RETRY_MINUTES", 30.0),
+            paperless_url=paperless_url,
+            paperless_token=paperless_token,
+            paperless_tags=tuple(paperless_tags),
+            paperless_max_wait_minutes=_float("PAPERLESS_MAX_WAIT_MINUTES", 30.0),
             queue_webhook_url=os.environ.get("QUEUE_WEBHOOK_URL", "").strip(),
             queue_webhook_check_seconds=_int("QUEUE_WEBHOOK_CHECK_SECONDS", 10, minimum=1),
             queue_webhook_heartbeat_seconds=_int("QUEUE_WEBHOOK_HEARTBEAT_SECONDS", 300, minimum=10),
