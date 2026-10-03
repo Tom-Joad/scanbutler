@@ -4,6 +4,22 @@ All notable changes to this project are listed here. Versions follow
 [semantic versioning](https://semver.org/); while the major version is 0,
 minor versions may change behaviour or settings.
 
+## [0.9.0] - 2026-10-03
+
+### Changed
+- The text layer mode now depends on the file. Pure scans keep the full
+  treatment: forced OCR, deskew, clean, 300 dpi. PDFs that already contain
+  text use `--redo-ocr`, which replaces old OCR but keeps real digital text.
+  Born-digital PDFs, such as bank statements, are no longer rasterized. A test
+  file shrank instead of growing many times over.
+
+### Fixed
+- When a text layer mode fails, simpler modes are tried before the file
+  counts as failed.
+- ocrmypdf's actual error message now reaches the log and `.error.txt`.
+  Before, it was suppressed by `--quiet`, so a failure showed only as
+  `SubprocessOutputError`.
+
 ## [0.8.0] - 2026-10-03
 
 ### Added
@@ -107,6 +123,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[0.9.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.5.0...v0.6.0

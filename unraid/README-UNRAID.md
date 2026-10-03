@@ -112,6 +112,11 @@ appear on their own. Add them with **Add another Path, Port, Variable**; the
 
 - The container runs as `nobody:users` (99:100), like Unraid's shares, so
   output files can be edited and deleted over SMB.
+- If the text layer fails with errors that look like file-system problems
+  (`Input/output error`, missing files, `SubprocessOutputError`), point Work
+  at the pool directly, for example `/mnt/cache/appdata/scan-stack-splitter`
+  instead of `/mnt/user/...`. ocrmypdf writes many temporary files quickly,
+  and the direct path avoids Unraid's user-share layer.
 - Temporary page images go to `Work/tmp` on disk, not to RAM. A 500-page
   stack needs a few GB there while it is processed.
 - The Work folder holds the full OCR text of every file and is never cleaned

@@ -132,9 +132,21 @@ docker compose run --rm scan-stack-splitter process /data/some.pdf --profile sta
    type and the detail that sets it apart, plus the date it is about. For
    reports and lab results, that is the examination or sampling date. For
    letters, it is the issue date.
-5. **Text layer.** ocrmypdf replaces any existing text layer (`--force-ocr`).
-   It deskews the pages, cleans the image Tesseract reads and upsamples poor
-   scans to 300 dpi. The image ships Tesseract's
+5. **Text layer.** ocrmypdf adds Tesseract's text, choosing the mode per
+   file:
+   - **Pure scans** (no text at all): `--force-ocr`. Pages are deskewed, the
+     image Tesseract reads is cleaned, and poor scans are upsampled to 300
+     dpi.
+   - **PDFs that already contain text**: `--redo-ocr`. This covers born-digital
+     PDFs such as online bank statements, and scans that carry the scanner's
+     own OCR. An old OCR layer is replaced, while real digital text stays as it
+     is. Forcing OCR would turn such pages into pictures of themselves, many
+     times the size.
+
+   If a mode fails, a simpler one is tried before the file counts as failed.
+   The last resort OCRs only pages without text and does no image processing.
+   The log and `.error.txt` show ocrmypdf's actual error message. The image
+   ships Tesseract's
    [`tessdata_best`](https://github.com/tesseract-ocr/tessdata_best) models
    for German and English. They are slower than the defaults, but hold up much
    better on poor scans.
