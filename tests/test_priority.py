@@ -8,11 +8,11 @@ import time
 import httpx
 import pikepdf
 
-from stacksplit import pdfops, priority
-from stacksplit.mistral import MistralClient
-from stacksplit.notify import QueueReporter
-from stacksplit.pdfops import JobBudget
-from stacksplit.watcher import InboxWatcher
+from scanbutler import pdfops, priority
+from scanbutler.mistral import MistralClient
+from scanbutler.notify import QueueReporter
+from scanbutler.pdfops import JobBudget
+from scanbutler.watcher import InboxWatcher
 
 from .conftest import FakeBackend, make_pdf
 from .test_text_source import make_text_pdf
@@ -150,7 +150,7 @@ def test_scanner_works_on_several_files_at_once(settings, monkeypatch):
 
     running, peak, lock = [0], [0], threading.Lock()
     marks = []
-    import stacksplit.watcher as watcher_module
+    import scanbutler.watcher as watcher_module
 
     real = watcher_module.process_stack
 
@@ -213,7 +213,7 @@ def test_a_cut_off_pdf_waits_until_it_is_complete(settings):
 
 
 def test_a_file_that_changes_while_processing_stays_in_the_inbox(settings, monkeypatch):
-    import stacksplit.watcher as watcher_module
+    import scanbutler.watcher as watcher_module
 
     scanner = settings.profile("scanner")
     scanner.inbox.mkdir(parents=True)

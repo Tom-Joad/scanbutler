@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from stacksplit.config import Settings, auto_jobs
+from scanbutler.config import Settings, auto_jobs
 
 GB = 2**30
 
@@ -29,7 +29,7 @@ def test_budget_makes_runs_wait_instead_of_overcommitting():
     import threading
     import time
 
-    from stacksplit.pdfops import JobBudget
+    from scanbutler.pdfops import JobBudget
 
     budget = JobBudget(2)
     running, peak, lock = [0], [0], threading.Lock()
@@ -81,7 +81,7 @@ class FakeCgroup:
     ],
 )
 def test_available_cpus_respects_container_limits(monkeypatch, affinity, files, cpus):
-    import stacksplit.config as config
+    import scanbutler.config as config
 
     FakeCgroup.files = files
     monkeypatch.setattr(config, "Path", FakeCgroup)

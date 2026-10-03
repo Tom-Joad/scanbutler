@@ -6,7 +6,7 @@ import json
 
 import httpx
 
-from stacksplit.mistral import MistralClient
+from scanbutler.mistral import MistralClient
 
 
 class FakeApi:

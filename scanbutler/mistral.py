@@ -196,7 +196,7 @@ class MistralClient:
         try:
             job = self._post(
                 "/batch/jobs",
-                {"input_files": [uploaded["id"]], "model": model, "endpoint": endpoint, "metadata": {"tool": "scan-stack-splitter"}},
+                {"input_files": [uploaded["id"]], "model": model, "endpoint": endpoint, "metadata": {"tool": "scanbutler"}},
             )
         except Exception:
             self.delete_files([uploaded["id"]])

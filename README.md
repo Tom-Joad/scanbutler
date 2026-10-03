@@ -1,7 +1,7 @@
-# scan-stack-splitter
+# Scanbutler
 
-[![Build and push image](https://github.com/Tom-Joad/scan-stack-splitter/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/Tom-Joad/scan-stack-splitter/actions/workflows/build-and-push.yml)
-[![Latest release](https://img.shields.io/github/v/release/Tom-Joad/scan-stack-splitter)](https://github.com/Tom-Joad/scan-stack-splitter/releases/latest)
+[![Build and push image](https://github.com/Tom-Joad/scanbutler/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/Tom-Joad/scanbutler/actions/workflows/build-and-push.yml)
+[![Latest release](https://img.shields.io/github/v/release/Tom-Joad/scanbutler)](https://github.com/Tom-Joad/scanbutler/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Turn scanned paper into searchable PDFs, one per document, named after their
@@ -133,14 +133,14 @@ container as a user that may write there (`PUID`/`PGID` in
 You need Docker and a [Mistral API key](https://console.mistral.ai/).
 
 ```bash
-git clone https://github.com/Tom-Joad/scan-stack-splitter.git
-cd scan-stack-splitter
+git clone https://github.com/Tom-Joad/scanbutler.git
+cd scanbutler
 cp .env.example .env        # set MISTRAL_API_KEY, and DATA_PATH, PUID, PGID if needed
 docker compose up -d --build
 docker compose logs -f
 ```
 
-The prebuilt image `ghcr.io/tom-joad/scan-stack-splitter` can replace the
+The prebuilt image `ghcr.io/tom-joad/scanbutler` can replace the
 local build, see `docker-compose.yml`.
 
 On first start, the container creates this layout under `DATA_PATH`:
@@ -160,7 +160,7 @@ scan over the network is safe.
 To process a single file once, without the watcher:
 
 ```bash
-docker compose run --rm scan-stack-splitter process /data/some.pdf --profile stacks --folder "Household"
+docker compose run --rm scanbutler process /data/some.pdf --profile stacks --folder "Household"
 ```
 
 ## How it works
@@ -253,7 +253,7 @@ To fix a split, edit `plan.json`: change `pages`, or merge and split entries.
 Set `title` to `""` to have the title and date generated again. Then run:
 
 ```bash
-docker compose exec scan-stack-splitter stacksplit rebuild "stacks/Household/stack-01-1a2b3c4d"
+docker compose exec scanbutler scanbutler rebuild "stacks/Household/stack-01-1a2b3c4d"
 ```
 
 The files listed in `written_files` are replaced. Nothing is OCR'd again.
@@ -590,8 +590,8 @@ There is no local Python setup to maintain: the image contains everything,
 and the tests run inside it.
 
 ```bash
-docker build -t scan-stack-splitter:dev .
-docker run --rm --user root --entrypoint sh -v "$PWD:/src" -w /src scan-stack-splitter:dev \
+docker build -t scanbutler:dev .
+docker run --rm --user root --entrypoint sh -v "$PWD:/src" -w /src scanbutler:dev \
   -c "pip install -q pytest && python -m pytest -q"
 ```
 

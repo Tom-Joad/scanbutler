@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Report a security problem
-    url: https://github.com/Tom-Joad/scan-stack-splitter/security/advisories/new
+    url: https://github.com/Tom-Joad/scanbutler/security/advisories/new
     about: Please report vulnerabilities privately, not as a public issue.

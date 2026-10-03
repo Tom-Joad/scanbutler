@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pikepdf
 
-from stacksplit.ocr import BATCH_STATE, BatchOptions, _chunk_bytes, _group_by_size, run_ocr
+from scanbutler.ocr import BATCH_STATE, BatchOptions, _chunk_bytes, _group_by_size, run_ocr
 
 from .conftest import FakeBackend, make_pdf
 

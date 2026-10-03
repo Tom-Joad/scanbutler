@@ -7,9 +7,9 @@ from pathlib import PurePosixPath
 import pikepdf
 import pytest
 
-from stacksplit.config import ConfigError, Settings
-from stacksplit.pdfops import page_texts
-from stacksplit.pipeline import PLAN, process_stack
+from scanbutler.config import ConfigError, Settings
+from scanbutler.pdfops import page_texts
+from scanbutler.pipeline import PLAN, process_stack
 
 from .conftest import FakeBackend
 

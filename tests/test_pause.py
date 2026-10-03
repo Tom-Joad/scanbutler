@@ -5,9 +5,9 @@ import threading
 import httpx
 import pytest
 
-from stacksplit.mistral import MistralClient, MistralError, MistralLimitError, is_limit_response
-from stacksplit.pause import PauseGate, limit_error_in
-from stacksplit.watcher import InboxWatcher
+from scanbutler.mistral import MistralClient, MistralError, MistralLimitError, is_limit_response
+from scanbutler.pause import PauseGate, limit_error_in
+from scanbutler.watcher import InboxWatcher
 
 from .conftest import FakeBackend, make_pdf
 

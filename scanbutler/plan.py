@@ -3,7 +3,7 @@
 Page numbers in the plan are 1-based and written as ranges ("1-3, 5"), the
 way a person reads them off a PDF viewer. Correcting a wrong split means
 editing `pages` (and clearing `title` to have it re-generated), then running
-`stacksplit rebuild`.
+`scanbutler rebuild`.
 """
 
 from __future__ import annotations

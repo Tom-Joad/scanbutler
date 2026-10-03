@@ -4,7 +4,7 @@ import json
 
 import httpx
 
-from stacksplit.notify import QueueReporter, describe_error
+from scanbutler.notify import QueueReporter, describe_error
 
 
 def make(settings, responder):
@@ -66,7 +66,7 @@ def test_unreachable_receiver_is_retried_and_never_raises(settings):
 def test_log_shows_sends_and_errors_without_leaking_the_webhook_id(settings, caplog):
     responses = iter([httpx.Response(404, text="Not Found"), httpx.Response(404, text="Not Found"), httpx.Response(200)])
     reporter, client, _ = make(settings, lambda: next(responses))
-    caplog.set_level("INFO", logger="stacksplit.notify")
+    caplog.set_level("INFO", logger="scanbutler.notify")
 
     reporter.report_if_due(client, now=0)
     reporter.report_if_due(client, now=1)  # same error again: not repeated in the log

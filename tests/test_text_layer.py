@@ -5,7 +5,7 @@ import subprocess
 import pikepdf
 import pytest
 
-from stacksplit import pdfops
+from scanbutler import pdfops
 
 from .conftest import make_pdf
 from .test_text_source import make_text_pdf
@@ -123,7 +123,7 @@ def test_a_run_that_takes_too_long_falls_back(tmp_path, monkeypatch):
 
 
 def test_limit_settings(monkeypatch):
-    from stacksplit.config import Settings
+    from scanbutler.config import Settings
 
     monkeypatch.setenv("MISTRAL_API_KEY", "x")
     assert Settings.from_env().ocr_limits == pdfops.OcrLimits()

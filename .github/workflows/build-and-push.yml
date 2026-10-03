@@ -18,7 +18,7 @@ permissions:
 env:
   # Spelled out rather than derived from github.repository_owner: container
   # registries reject upper case in an image name, and the owner has it.
-  IMAGE: ghcr.io/tom-joad/scan-stack-splitter
+  IMAGE: ghcr.io/tom-joad/scanbutler
 
 # Actions are pinned to commit SHAs, not tags: a tag is mutable, so `@v7`
 # means "whatever that repo points it at today" — which is a straight path

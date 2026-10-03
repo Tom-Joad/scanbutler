@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from PIL import Image, ImageDraw
 
-from stacksplit.boundaries import Decision, _apply_markers
-from stacksplit.ocr import Page
-from stacksplit.pdfops import ink_coverage
+from scanbutler.boundaries import Decision, _apply_markers
+from scanbutler.ocr import Page
+from scanbutler.pdfops import ink_coverage
 
 
 def test_ink_coverage_separates_blank_tinted_and_text_pages(tmp_path):

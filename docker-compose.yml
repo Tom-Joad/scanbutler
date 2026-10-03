@@ -1,9 +1,9 @@
 services:
-  scan-stack-splitter:
+  scanbutler:
     build: .
     # Published images can be used instead of a local build:
-    # image: ghcr.io/tom-joad/scan-stack-splitter:latest
-    container_name: scan-stack-splitter
+    # image: ghcr.io/tom-joad/scanbutler:latest
+    container_name: scanbutler
     restart: unless-stopped
 
     # Run as the owner of the data share so output files stay editable over

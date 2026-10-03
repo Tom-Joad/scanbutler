@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from stacksplit.llm_cache import CachedChat
+from scanbutler.llm_cache import CachedChat
 
 
 class Counting:

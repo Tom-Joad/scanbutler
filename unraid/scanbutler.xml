@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
 <Container version="2">
-  <Name>scan-stack-splitter</Name>
-  <Repository>ghcr.io/tom-joad/scan-stack-splitter:latest</Repository>
+  <Name>scanbutler</Name>
+  <Repository>ghcr.io/tom-joad/scanbutler:latest</Repository>
   <Registry>https://ghcr.io</Registry>
   <Network>bridge</Network>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/Tom-Joad/scan-stack-splitter</Support>
-  <Project>https://github.com/Tom-Joad/scan-stack-splitter</Project>
-  <TemplateURL>https://raw.githubusercontent.com/Tom-Joad/scan-stack-splitter/main/unraid/scan-stack-splitter.xml</TemplateURL>
+  <Support>https://github.com/Tom-Joad/scanbutler</Support>
+  <Project>https://github.com/Tom-Joad/scanbutler</Project>
+  <TemplateURL>https://raw.githubusercontent.com/Tom-Joad/scanbutler/main/unraid/scanbutler.xml</TemplateURL>
   <Overview>
     Turns scanned paper into searchable PDFs, one per document, named by topic and date. The
     Stacks input splits large scans (hundreds of pages, no separator sheets) into documents by
@@ -21,10 +21,10 @@
   </Overview>
   <Category>Productivity: Tools:</Category>
   <ExtraParams>--init --user 99:100 --security-opt no-new-privileges --memory=4g</ExtraParams>
-  <Config Name="Stacks" Target="/data/stacks" Default="/mnt/user/Documents/scan-stack-splitter/stacks" Mode="rw" Description="Large scans to split. inbox/, output/, archive/ and failed/ are created here." Type="Path" Display="always" Required="true" Mask="false"/>
-  <Config Name="Scanner" Target="/data/scanner" Default="/mnt/user/Documents/scan-stack-splitter/scanner" Mode="rw" Description="Scanner input, one document per file. Point the scanner's network-folder target at inbox/ below this path." Type="Path" Display="always" Required="true" Mask="false"/>
-  <Config Name="Paperless" Target="/data/paperless" Default="/mnt/user/Documents/scan-stack-splitter/paperless" Mode="rw" Description="Optional Paperless-ngx input (needs PAPERLESS_URL): files get the text layer and are uploaded to Paperless." Type="Path" Display="always" Required="false" Mask="false"/>
-  <Config Name="Work" Target="/work" Default="/mnt/user/appdata/scan-stack-splitter" Mode="rw" Description="Per-stack OCR text, plan.json, review.md and temporary page images (several GB while a large stack is processed). Holds full document text: delete stacks you no longer need." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Stacks" Target="/data/stacks" Default="/mnt/user/Documents/scanbutler/stacks" Mode="rw" Description="Large scans to split. inbox/, output/, archive/ and failed/ are created here." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Scanner" Target="/data/scanner" Default="/mnt/user/Documents/scanbutler/scanner" Mode="rw" Description="Scanner input, one document per file. Point the scanner's network-folder target at inbox/ below this path." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Paperless" Target="/data/paperless" Default="/mnt/user/Documents/scanbutler/paperless" Mode="rw" Description="Optional Paperless-ngx input (needs PAPERLESS_URL): files get the text layer and are uploaded to Paperless." Type="Path" Display="always" Required="false" Mask="false"/>
+  <Config Name="Work" Target="/work" Default="/mnt/user/appdata/scanbutler" Mode="rw" Description="Per-stack OCR text, plan.json, review.md and temporary page images (several GB while a large stack is processed). Holds full document text: delete stacks you no longer need." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="MISTRAL_API_KEY" Target="MISTRAL_API_KEY" Default="" Mode="" Description="Mistral API key" Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="MISTRAL_LLM_MODEL" Target="MISTRAL_LLM_MODEL" Default="mistral-large-latest" Mode="" Description="Model for splitting and naming" Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="MISTRAL_MAX_RPS" Target="MISTRAL_MAX_RPS" Default="1" Mode="" Description="Requests per second, slightly below your account's limit for MISTRAL_LLM_MODEL (Mistral console: API &gt; Limits)" Type="Variable" Display="always" Required="false" Mask="false"/>

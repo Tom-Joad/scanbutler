@@ -7,8 +7,8 @@ from pathlib import PurePosixPath
 import pikepdf
 import pytest
 
-from stacksplit.pipeline import PLAN, REVIEW, process_stack, rebuild
-from stacksplit.watcher import InboxWatcher
+from scanbutler.pipeline import PLAN, REVIEW, process_stack, rebuild
+from scanbutler.watcher import InboxWatcher
 
 from .conftest import FakeBackend, make_pdf
 

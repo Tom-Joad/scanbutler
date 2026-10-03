@@ -29,7 +29,7 @@ from .pipeline import AlreadyInProgress, process_for_paperless, process_stack
 
 log = logging.getLogger(__name__)
 
-HEARTBEAT = Path("/tmp/stacksplit.heartbeat")
+HEARTBEAT = Path("/tmp/scanbutler.heartbeat")
 PAPERLESS_RETRY_SECONDS = 300
 # A PDF without its end is taken as still being written; only after this long
 # without change is it processed anyway (and then fails with a clear error).

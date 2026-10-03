@@ -276,7 +276,7 @@ def write_review(plan: Plan, work: Path) -> None:
         "",
         f"1. Edit `{PLAN}` in this folder: change `pages` of the affected documents,",
         "   split or merge entries. Clear `title` to have title and date re-generated.",
-        "2. Run `stacksplit rebuild \"<this folder>\"` inside the container.",
+        "2. Run `scanbutler rebuild \"<this folder>\"` inside the container.",
         "   The files listed in `written_files` are replaced; nothing is OCR'd again.",
         "",
     ]

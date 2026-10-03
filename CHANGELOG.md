@@ -7,9 +7,27 @@ layout, a changed webhook payload) only comes with a new major version.
 
 ## [1.0.0] - 2026-10-03
 
-First stable release. No functional changes since 0.12.0. Settings, folder
-layout, file naming, `plan.json` and the webhook payload are now stable, see
-the versioning note above.
+First stable release. Settings, folder layout, file naming, `plan.json` and
+the webhook payload are now stable, see the versioning note above.
+
+### Changed
+- **The project is now called Scanbutler.** It does far more than splitting
+  stacks, so `scan-stack-splitter` no longer fit. Renamed are the repository
+  (`Tom-Joad/scanbutler`; old links redirect), the image
+  (`ghcr.io/tom-joad/scanbutler`), the command inside the container
+  (`scanbutler` instead of `stacksplit`), the Unraid template
+  (`unraid/scanbutler.xml`) and the default folder names in the templates.
+  Settings, the folder layout inside the container and the work folder are
+  unchanged.
+
+### Upgrading from 0.x
+- Change the image to `ghcr.io/tom-joad/scanbutler:latest`. On Unraid: edit
+  the container and set *Repository*. Your paths and variables stay as they
+  are; you may also rename the container.
+- Commands run inside the container use `scanbutler` now, for example
+  `docker exec <container> scanbutler rebuild "scanner/<folder>"`.
+- The old image `ghcr.io/tom-joad/scan-stack-splitter` gets no further
+  updates.
 
 ### Added
 - Issue templates for bug reports and feature requests. They ask for log
@@ -221,19 +239,19 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
-[1.0.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.12.0...v1.0.0
-[0.12.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.11.1...v0.12.0
-[0.11.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.11.0...v0.11.1
-[0.11.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.10.0...v0.11.0
-[0.10.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.9.1...v0.10.0
-[0.9.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.9.0...v0.9.1
-[0.9.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.8.0...v0.9.0
-[0.8.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/Tom-Joad/scan-stack-splitter/releases/tag/v0.1.0
+[1.0.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.12.0...v1.0.0
+[0.12.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.1...v0.12.0
+[0.11.1]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.0...v0.11.1
+[0.11.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.9.1...v0.10.0
+[0.9.1]: https://github.com/Tom-Joad/scanbutler/compare/v0.9.0...v0.9.1
+[0.9.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/Tom-Joad/scanbutler/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v0.1.0

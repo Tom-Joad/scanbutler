@@ -2,8 +2,8 @@ FROM python:3.12-slim-bookworm
 
 # image.source is what makes a GHCR package inherit the repository's
 # visibility instead of staying private on its own.
-LABEL org.opencontainers.image.source="https://github.com/Tom-Joad/scan-stack-splitter" \
-      org.opencontainers.image.title="scan-stack-splitter" \
+LABEL org.opencontainers.image.source="https://github.com/Tom-Joad/scanbutler" \
+      org.opencontainers.image.title="Scanbutler" \
       org.opencontainers.image.description="Split scanned PDF stacks into named, searchable documents using Mistral OCR" \
       org.opencontainers.image.licenses="MIT"
 
@@ -39,9 +39,9 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --requirement requirements.txt
 
-COPY stacksplit ./stacksplit
-RUN printf '#!/bin/sh\nexec python -m stacksplit "$@"\n' > /usr/local/bin/stacksplit \
- && chmod +x /usr/local/bin/stacksplit
+COPY scanbutler ./scanbutler
+RUN printf '#!/bin/sh\nexec python -m scanbutler "$@"\n' > /usr/local/bin/scanbutler \
+ && chmod +x /usr/local/bin/scanbutler
 
 ENV PYTHONPATH=/app
 
@@ -52,7 +52,7 @@ USER splitter
 # A watcher thread touches the heartbeat every 30 s, also while a long
 # stack is being processed.
 HEALTHCHECK --interval=60s --timeout=5s --start-period=60s --retries=3 \
-    CMD python -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/stacksplit.heartbeat') < 300 else 1)"
+    CMD python -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/scanbutler.heartbeat') < 300 else 1)"
 
-ENTRYPOINT ["stacksplit"]
+ENTRYPOINT ["scanbutler"]
 CMD ["run"]

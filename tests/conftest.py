@@ -6,7 +6,7 @@ import json
 import pikepdf
 import pytest
 
-from stacksplit.config import Settings
+from scanbutler.config import Settings
 
 
 def make_pdf(path, pages: int) -> None:

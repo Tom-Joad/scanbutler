@@ -1,14 +1,14 @@
-# Running scan-stack-splitter on Unraid
+# Running Scanbutler on Unraid
 
 The container runs permanently and watches two inboxes. It has no web
 interface; everything it does shows up in the container log.
 
 ## Install
 
-1. **Add the template.** Copy `scan-stack-splitter.xml` to
+1. **Add the template.** Copy `scanbutler.xml` to
    `/boot/config/plugins/dockerMan/templates-user/` on the flash drive. Then,
    in the Unraid web UI, go to **Docker → Add Container** and pick
-   `scan-stack-splitter` from the template dropdown.
+   `scanbutler` from the template dropdown.
 
 2. **Fill in the settings.**
 
@@ -17,7 +17,7 @@ interface; everything it does shows up in the container log.
    | Stacks | e.g. `/mnt/user/<share>/scan-splitter/stacks` |
    | Scanner | e.g. `/mnt/user/<share>/scan-splitter/scanner` |
    | Paperless | optional, e.g. `/mnt/user/<share>/scan-splitter/paperless` |
-   | Work | `/mnt/user/appdata/scan-stack-splitter` |
+   | Work | `/mnt/user/appdata/scanbutler` |
    | `MISTRAL_API_KEY` | your key (masked in the UI) |
    | `MISTRAL_LLM_MODEL` | `mistral-large-latest`, or a pinned version such as `mistral-large-2512` |
    | `MISTRAL_MAX_RPS` | a little below your account's requests-per-second limit for that model |
@@ -52,7 +52,7 @@ token that has the `read:packages` scope.
 - To correct a split, edit `plan.json` in that folder, then run:
 
   ```bash
-  docker exec scan-stack-splitter stacksplit rebuild "stacks/Household/stack-01-<hash>"
+  docker exec scanbutler scanbutler rebuild "stacks/Household/stack-01-<hash>"
   ```
 
 ### Scanner
@@ -102,7 +102,7 @@ token that has the `read:packages` scope.
 
 ## Updating
 
-New versions are published as `ghcr.io/tom-joad/scan-stack-splitter:latest`.
+New versions are published as `ghcr.io/tom-joad/scanbutler:latest`.
 **Check for Updates** on the Docker page pulls them. A container you created
 earlier keeps its settings, so settings added to the template later do not
 appear on their own. Add them with **Add another Path, Port, Variable**; the
@@ -123,7 +123,7 @@ appear on their own. Add them with **Add another Path, Port, Variable**; the
   message. A helper process `died with SIGKILL` means it ran out of memory.
   For errors that look like file-system problems (`Input/output error`,
   missing files), point Work at the pool directly, for example
-  `/mnt/cache/appdata/scan-stack-splitter` instead of `/mnt/user/...`.
+  `/mnt/cache/appdata/scanbutler` instead of `/mnt/user/...`.
 - Temporary page images go to `Work/tmp` on disk, not to RAM. A 500-page
   stack needs a few GB there while it is processed.
 - The Work folder holds the full OCR text of every file and is never cleaned

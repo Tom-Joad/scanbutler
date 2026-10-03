@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-from stacksplit.boundaries import best_window, page_marker, window_starts
-from stacksplit.config import ConfigError, Settings
-from stacksplit.metadata import normalize_date
-from stacksplit.naming import build_stem, sanitize, unique_path
-from stacksplit.ocr import Page
-from stacksplit.plan import format_pages, parse_pages
+from scanbutler.boundaries import best_window, page_marker, window_starts
+from scanbutler.config import ConfigError, Settings
+from scanbutler.metadata import normalize_date
+from scanbutler.naming import build_stem, sanitize, unique_path
+from scanbutler.ocr import Page
+from scanbutler.plan import format_pages, parse_pages
 
 
 def page(text: str = "", header: str = "", footer: str = "", images: bool = False, index: int = 0) -> Page:

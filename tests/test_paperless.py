@@ -6,10 +6,10 @@ import threading
 import httpx
 import pytest
 
-from stacksplit.config import ConfigError, Settings
-from stacksplit.paperless import PaperlessClient, PaperlessError, PaperlessUnavailable
-from stacksplit.pipeline import UPLOAD
-from stacksplit.watcher import InboxWatcher
+from scanbutler.config import ConfigError, Settings
+from scanbutler.paperless import PaperlessClient, PaperlessError, PaperlessUnavailable
+from scanbutler.pipeline import UPLOAD
+from scanbutler.watcher import InboxWatcher
 
 from .conftest import FakeBackend, make_pdf
 
@@ -197,7 +197,7 @@ def test_task_list_may_be_paginated():
     ],
 )
 def test_task_formats_of_both_paperless_versions(task, status, document):
-    from stacksplit.paperless import task_document_id, task_message, task_status
+    from scanbutler.paperless import task_document_id, task_message, task_status
 
     assert task_status(task) == status
     assert task_document_id(task) == document
@@ -251,8 +251,8 @@ def test_failed_content_update_keeps_the_document(paperless_settings, monkeypatc
 
 
 def test_paperless_content_layout():
-    from stacksplit.ocr import Page
-    from stacksplit.pipeline import paperless_content
+    from scanbutler.ocr import Page
+    from scanbutler.pipeline import paperless_content
 
     pages = [
         Page(0, "Body one ![img-0.jpeg](img-0.jpeg)", "Letterhead", "Page 1 of 2", False),

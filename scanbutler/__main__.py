@@ -1,4 +1,4 @@
-"""Command line entry point: `stacksplit run|process|rebuild`."""
+"""Command line entry point: `scanbutler run|process|rebuild`."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .paperless import PaperlessClient
 from .pipeline import process_for_paperless, process_stack, rebuild
 from .watcher import run_all
 
-log = logging.getLogger("stacksplit")
+log = logging.getLogger("scanbutler")
 
 
 def _client(settings: Settings) -> MistralClient:
@@ -30,7 +30,7 @@ def _client(settings: Settings) -> MistralClient:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="stacksplit", description="Split scanned PDF stacks into named, searchable documents.")
+    parser = argparse.ArgumentParser(prog="scanbutler", description="Turn scanned paper into named, searchable PDFs.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("run", help="watch the inboxes of all enabled profiles (default)")
