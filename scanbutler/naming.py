@@ -15,6 +15,10 @@ MAX_STEM = 150
 
 def sanitize(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
+    # Titles come from a language model reading untrusted documents. Format
+    # characters such as U+202E (right-to-left override) could make a name
+    # display differently from what it is, so they are dropped.
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
     text = _FORBIDDEN.sub(" ", text)
     text = _SPACES.sub(" ", text).strip(" .")
     if text.upper() in _RESERVED:

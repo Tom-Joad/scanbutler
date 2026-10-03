@@ -1,10 +1,12 @@
-FROM python:3.12-slim-bookworm
+# Debian 13 (trixie): bookworm is oldstable and leaves many CVEs unfixed.
+# Pinned by digest (a multi-arch index); Dependabot proposes new digests.
+FROM python:3.12-slim-trixie@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
 # image.source is what makes a GHCR package inherit the repository's
 # visibility instead of staying private on its own.
 LABEL org.opencontainers.image.source="https://github.com/Tom-Joad/scanbutler" \
       org.opencontainers.image.title="Scanbutler" \
-      org.opencontainers.image.description="Split scanned PDF stacks into named, searchable documents using Mistral OCR" \
+      org.opencontainers.image.description="Turn scanned paper into named, searchable PDFs: split stacks by content, name scanner files, feed Paperless-ngx" \
       org.opencontainers.image.licenses="MIT"
 
 ENV PYTHONUNBUFFERED=1 \
@@ -12,7 +14,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 # Tesseract and Ghostscript power the searchable text layer; unpaper backs
 # ocrmypdf's --clean.
+# The upgrade picks up Debian security fixes newer than the pinned base image.
 RUN apt-get update \
+ && apt-get upgrade --yes \
  && apt-get install --yes --no-install-recommends \
       tesseract-ocr ghostscript unpaper curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -37,7 +41,11 @@ RUN set -eu; \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip install --no-cache-dir --requirement requirements.txt
+# pip is only needed to build the image. It is removed afterwards: the
+# libraries it bundles (urllib3, msgpack, setuptools) lag behind and would
+# show up in every vulnerability scan, without ever running.
+RUN pip install --no-cache-dir --requirement requirements.txt \
+ && pip uninstall --yes pip
 
 COPY scanbutler ./scanbutler
 RUN printf '#!/bin/sh\nexec python -m scanbutler "$@"\n' > /usr/local/bin/scanbutler \
@@ -46,8 +54,8 @@ RUN printf '#!/bin/sh\nexec python -m scanbutler "$@"\n' > /usr/local/bin/scanbu
 ENV PYTHONPATH=/app
 
 # Overridden by `user:` in docker-compose to match the owner of the shares.
-RUN useradd --system --uid 10001 --no-create-home splitter
-USER splitter
+RUN useradd --system --uid 10001 --no-create-home scanbutler
+USER scanbutler
 
 # A watcher thread touches the heartbeat every 30 s, also while a long
 # stack is being processed.

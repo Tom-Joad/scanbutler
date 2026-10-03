@@ -51,5 +51,8 @@ def configure(level: str = "INFO") -> None:
     root.setLevel(level.upper())
 
     # httpx logs every request URL at INFO; that is noise at this level.
+    # Both stay at WARNING even with LOG_LEVEL=DEBUG: request URLs include the
+    # webhook URL, whose ID is a secret.
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.getLogger("ocrmypdf").setLevel(logging.WARNING)

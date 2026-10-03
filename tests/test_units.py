@@ -109,3 +109,11 @@ def test_config_validation(monkeypatch):
     with pytest.raises(ConfigError):
         Settings.from_env()
     assert Settings.from_env(require_api_key=False).boundary_step == 3
+
+
+def test_file_names_drop_invisible_format_characters():
+    from scanbutler.naming import sanitize
+
+    # U+202E would make "Invoice<RLO>fdp.exe" display as "Invoiceexe.pdf".
+    assert sanitize("Invoice‮fdp.exe") == "Invoicefdp.exe"
+    assert sanitize("Lab​results") == "Labresults"

@@ -183,7 +183,7 @@ def max_image_dpi(path: Path) -> float:
     return best
 
 
-def downsample_images(src: Path, dst: Path, dpi: int) -> None:
+def downsample_images(src: Path, dst: Path, dpi: int, timeout: float | None = None) -> None:
     """Rewrite `src` with every image above `dpi` downsampled to `dpi` (Ghostscript).
 
     Text and vector graphics stay as they are. Downsampled images are stored
@@ -202,7 +202,11 @@ def downsample_images(src: Path, dst: Path, dpi: int) -> None:
         f"-sOutputFile={dst}",
         str(src),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        dst.unlink(missing_ok=True)
+        raise RuntimeError(f"Ghostscript did not finish downsampling images within {timeout:.0f} s") from None
     if result.returncode != 0:
         dst.unlink(missing_ok=True)
         raise RuntimeError(f"Ghostscript could not downsample images: {result.stderr.strip()[-500:]}")
@@ -343,7 +347,7 @@ def _searchable(
         except Exception:  # noqa: BLE001 - leave odd files to ocrmypdf's own error handling
             dpi = 0.0
         if dpi > limits.max_image_dpi * 1.05:
-            downsample_images(src, prepared, limits.max_image_dpi)
+            downsample_images(src, prepared, limits.max_image_dpi, limits.file_timeout_minutes * 60)
             ocr_input = prepared
             log.info(
                 "images downsampled",

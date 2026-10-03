@@ -171,3 +171,13 @@ def test_downsampling_can_be_switched_off(tmp_path, monkeypatch):
     pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", "", pdfops.OcrLimits(max_image_dpi=0))
 
     assert [cmd[0] for cmd in calls] == ["ocrmypdf"]
+
+
+def test_downsampling_has_a_time_limit(tmp_path, monkeypatch):
+    def hang(cmd, capture_output, text, timeout=None):
+        assert timeout == 60
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    monkeypatch.setattr(pdfops.subprocess, "run", hang)
+    with pytest.raises(RuntimeError, match="did not finish"):
+        pdfops.downsample_images(tmp_path / "in.pdf", tmp_path / "out.pdf", 600, timeout=60)

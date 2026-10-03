@@ -1,4 +1,4 @@
-# Local configuration — holds the shared secret and the target MAC
+# Local configuration: holds the Mistral API key and other tokens
 .env
 .env.*
 !.env.example

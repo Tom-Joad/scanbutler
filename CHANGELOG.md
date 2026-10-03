@@ -35,6 +35,22 @@ the webhook payload are now stable, see the versioning note above.
 - The Unraid template carries its `TemplateURL`, so Unraid can pick up
   template changes.
 
+### Security
+- The image is based on Debian 13 (trixie) instead of Debian 12, pinned by
+  digest, and installs Debian's latest security updates at build time. Known
+  vulnerabilities in the image: critical 11 → 1, high 187 → 152, with none
+  left that has a fix available.
+- pip is removed from the image after installing the dependencies; the
+  libraries it bundles (urllib3, msgpack, setuptools) had known
+  vulnerabilities. For the tests, `ensurepip` brings it back.
+- Ghostscript downsampling gets the same time limit as ocrmypdf
+  (`OCRMYPDF_FILE_TIMEOUT_MINUTES`).
+- Invisible Unicode format characters (such as U+202E, right-to-left
+  override) are removed from generated file names, so a name can't display
+  differently from what it is.
+- `httpcore` stays at WARNING even with `LOG_LEVEL=DEBUG`, so request URLs,
+  including the webhook URL, never reach the log.
+
 ### CI
 - GitHub Actions updated to their Node 24 releases (setup-python 7,
   gitleaks-action 3, setup-qemu 4, setup-buildx 4.4.1, login 4.6.0). The

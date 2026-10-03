@@ -587,12 +587,13 @@ A Docker template and step-by-step instructions are in
 ## Development
 
 There is no local Python setup to maintain: the image contains everything,
-and the tests run inside it.
+and the tests run inside it. The image ships without pip, so the test run
+installs it first with `ensurepip`.
 
 ```bash
 docker build -t scanbutler:dev .
 docker run --rm --user root --entrypoint sh -v "$PWD:/src" -w /src scanbutler:dev \
-  -c "pip install -q pytest && python -m pytest -q"
+  -c "python -m ensurepip >/dev/null && python -m pip install -q pytest && python -m pytest -q"
 ```
 
 The tests replace Mistral with a fake and need no API key. CI runs them
