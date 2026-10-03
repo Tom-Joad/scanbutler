@@ -81,6 +81,15 @@ def memory_limit_bytes() -> int | None:
     return None
 
 
+CONFIG_DIR = Path("/config")
+
+
+def default_work_dir(data: Path) -> Path:
+    """The work folder when WORK_DIR is not set: /config, as in every
+    linuxserver.io container. Outside the container (tests), data/work."""
+    return CONFIG_DIR if CONFIG_DIR.is_dir() else data / "work"
+
+
 def available_cpus() -> int:
     """CPUs this container may use: its CPU set and any --cpus quota (cgroup v2/v1).
 
@@ -288,7 +297,7 @@ class Settings:
             request_timeout=_float("MISTRAL_TIMEOUT", 300.0),
             max_rps=_float("MISTRAL_MAX_RPS", 1.0),
             profiles=tuple(profiles),
-            work_dir=Path(_str("WORK_DIR", str(data / "work"))),
+            work_dir=Path(os.environ["WORK_DIR"]) if os.environ.get("WORK_DIR", "").strip() else default_work_dir(data),
             poll_interval=_int("POLL_INTERVAL", 30, minimum=1),
             stable_seconds=_int("STABLE_SECONDS", 60, minimum=0),
             ocr_chunk_pages=_int("OCR_CHUNK_PAGES", 50, minimum=1),

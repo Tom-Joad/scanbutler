@@ -1,0 +1,23 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+# /config holds the work folder (plans, caches, upload ledger) and the
+# temporary page images.
+mkdir -p /config
+
+if [[ -z ${LSIO_NON_ROOT_USER} ]]; then
+    # Not recursive: a large work folder would make every start slow, and
+    # everything below /config is written by abc anyway.
+    lsiown abc:abc /config
+
+    # Input roots that Docker created itself (a missing host folder, or a
+    # fresh volume) belong to root, and abc couldn't create inbox/ and the
+    # rest there. Only those are handed over; folders that already belong to
+    # someone else are left as they are.
+    for dir in "${DATA_DIR:-/data}" "${STACKS_DIR:-${DATA_DIR:-/data}/stacks}" \
+               "${SCANNER_DIR:-${DATA_DIR:-/data}/scanner}" "${PAPERLESS_DIR:-${DATA_DIR:-/data}/paperless}"; do
+        if [[ -d ${dir} && $(stat -c %u "${dir}") == 0 ]]; then
+            lsiown abc:abc "${dir}"
+        fi
+    done
+fi

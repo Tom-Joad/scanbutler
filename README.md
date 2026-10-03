@@ -124,9 +124,9 @@ fine for a folder watcher, but a 500-page stack may then take hours.
 **Synology and other NAS systems:** in Container Manager, set the memory limit
 under *Resources* to at least 1 GB, or 4 GB if available. NAS models with
 32-bit ARM CPUs (armv7) are not supported; check your model's CPU
-architecture. Map the data and work folders to a shared folder, and run the
-container as a user that may write there (`PUID`/`PGID` in
-`docker-compose.yml`).
+architecture. Map `/data` to a shared folder and `/config` to a folder for
+the container's own data, and set `PUID`/`PGID` to a user that may write
+there, as with any linuxserver.io container.
 
 ## Quick start
 
@@ -135,7 +135,7 @@ You need Docker and a [Mistral API key](https://console.mistral.ai/).
 ```bash
 git clone https://github.com/Tom-Joad/scanbutler.git
 cd scanbutler
-cp .env.example .env        # set MISTRAL_API_KEY, and DATA_PATH, PUID, PGID if needed
+cp .env.example .env        # set MISTRAL_API_KEY, and DATA_PATH, PUID, PGID, TZ if needed
 docker compose up -d --build
 docker compose logs -f
 ```
@@ -149,19 +149,24 @@ On first start, the container creates this layout under `DATA_PATH`:
 stacks/     inbox/  output/  archive/  failed/
 scanner/    inbox/  output/  archive/  failed/
 paperless/  inbox/          archive/  failed/    (only with PAPERLESS_URL set)
-work/
 ```
+
+Its own data (plans, caches, review files) goes to `CONFIG_PATH`, mounted
+at `/config`.
 
 Put PDFs into `stacks/inbox/` or `scanner/inbox/`, optionally in
 sub-folders. Sub-folders are mirrored in `output/`. A file is picked up once
 it has not changed for `STABLE_SECONDS` (60 s by default), so copying a large
 scan over the network is safe.
 
-To process a single file once, without the watcher:
+To process a single file once, outside the inboxes:
 
 ```bash
-docker compose run --rm scanbutler process /data/some.pdf --profile stacks --folder "Household"
+docker compose exec scanbutler scanbutler process /data/some.pdf --profile stacks --folder "Household"
 ```
+
+Commands run with `docker exec` act as the `abc` user, so their files get
+the same owner as everything else.
 
 ## How it works
 
@@ -263,6 +268,25 @@ The files listed in `written_files` are replaced. Nothing is OCR'd again.
 All settings are environment variables. [`.env.example`](.env.example) lists
 them with comments.
 
+**Container** (linuxserver.io conventions)
+
+The image is built on [linuxserver.io](https://www.linuxserver.io/)'s
+Debian base and behaves like their containers: it starts as root, gives the
+`abc` user the IDs below and runs Scanbutler as `abc`.
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `-e PUID` | `911` | User ID that owns new files; use the owner of your data folder (Unraid: `99`) |
+| `-e PGID` | `911` | Group ID for new files (Unraid: `100`) |
+| `-e UMASK` | `022` | Permission mask for new files; `002` makes them writable for the group |
+| `-e TZ` | `Etc/UTC` | Time zone, e.g. `Europe/Berlin` |
+| `-v /config` | | Work folder: plans, caches, review files, the Paperless upload ledger and temporary page images |
+| `-v /data` | | The inputs: `stacks/`, `scanner/`, `paperless/` |
+
+Don't run the container with `--user` or `--init`: the base image's init
+system (s6-overlay) has to start as root and as process 1. Docker mods
+(`DOCKER_MODS`) work as with any linuxserver.io image.
+
 **Mistral**
 
 | Variable | Default | Purpose |
@@ -286,8 +310,8 @@ them with comments.
 | `STACKS_DIR` / `SCANNER_DIR` | `$DATA_DIR/stacks`, `$DATA_DIR/scanner` | Root of each input; `inbox/`, `output/`, `archive/` and `failed/` live below it |
 | `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
 | `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` | `mistral` / `tesseract` | Text for splitting and naming: `mistral` (Mistral OCR) or `tesseract` (free, from the text layer). The scanner falls back to `mistral` when `OCRMYPDF_ENABLED=false` |
-| `WORK_DIR` | `$DATA_DIR/work` | OCR results, plans and review files |
-| `TMPDIR` | `/tmp` | Temporary page images; point it at a disk for large stacks |
+| `WORK_DIR` | `/config` | OCR results, plans and review files |
+| `TMPDIR` | `$WORK_DIR/tmp` | Temporary page images, several GB for a large stack; on disk, not in RAM |
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
 | `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up. A PDF that isn't completely written (no `%%EOF` at its end) waits up to 10 minutes longer |
 
@@ -592,8 +616,8 @@ installs it first with `ensurepip`.
 
 ```bash
 docker build -t scanbutler:dev .
-docker run --rm --user root --entrypoint sh -v "$PWD:/src" -w /src scanbutler:dev \
-  -c "python -m ensurepip >/dev/null && python -m pip install -q pytest && python -m pytest -q"
+docker run --rm --entrypoint sh -v "$PWD:/src" -w /src scanbutler:dev \
+  -c "python3 -m ensurepip >/dev/null && python3 -m pip install -q pytest && python3 -m pytest -q"
 ```
 
 The tests replace Mistral with a fake and need no API key. CI runs them

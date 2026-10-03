@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [1.0.0] - 2026-10-03
+## [1.0.0] - unreleased
 
 First stable release. Settings, folder layout, file naming, `plan.json` and
 the webhook payload are now stable, see the versioning note above.
@@ -20,14 +20,30 @@ the webhook payload are now stable, see the versioning note above.
   Settings, the folder layout inside the container and the work folder are
   unchanged.
 
+- **linuxserver.io conventions.** The image is built on linuxserver.io's
+  Debian 13 base (s6-overlay) and behaves like their containers: `PUID`,
+  `PGID`, `UMASK` and `TZ` instead of `--user`, the work folder at `/config`
+  instead of `/work` or `/data/work`, and temporary page images in
+  `/config/tmp` without setting `TMPDIR`. `docker exec ... scanbutler`
+  commands run as the `abc` user, so their files get the same owner. Docker
+  mods work as usual. Python is now 3.13.
+- If the input folders can't be created (wrong `PUID`/`PGID`), the log says
+  so with the IDs in use and the watcher retries every minute, instead of
+  stopping with a traceback. Input folders that Docker created as root are
+  handed to `abc`.
+
 ### Upgrading from 0.x
-- Change the image to `ghcr.io/tom-joad/scanbutler:latest`. On Unraid: edit
-  the container and set *Repository*. Your paths and variables stay as they
-  are; you may also rename the container.
-- Commands run inside the container use `scanbutler` now, for example
+Set the container up anew, from the current Unraid template or
+`docker-compose.yml`:
+- Image `ghcr.io/tom-joad/scanbutler:latest`. The old image
+  `ghcr.io/tom-joad/scan-stack-splitter` gets no further updates.
+- Map your old work folder to `/config`, or copy its contents there. It
+  holds the plans for `rebuild` and the list of files already uploaded to
+  Paperless, which prevents duplicate uploads.
+- `PUID`/`PGID` instead of `--user` (Unraid: 99/100), and no `--init`.
+  `WORK_DIR` and `TMPDIR` can go.
+- Commands inside the container use `scanbutler` now, for example
   `docker exec <container> scanbutler rebuild "scanner/<folder>"`.
-- The old image `ghcr.io/tom-joad/scan-stack-splitter` gets no further
-  updates.
 
 ### Added
 - Issue templates for bug reports and feature requests. They ask for log
@@ -38,8 +54,8 @@ the webhook payload are now stable, see the versioning note above.
 ### Security
 - The image is based on Debian 13 (trixie) instead of Debian 12, pinned by
   digest, and installs Debian's latest security updates at build time. Known
-  vulnerabilities in the image: critical 11 → 1, high 187 → 152, with none
-  left that has a fix available.
+  vulnerabilities in the image: critical 11 → 1 (libxml2, no fix yet), with
+  none left that has a fix available.
 - pip is removed from the image after installing the dependencies; the
   libraries it bundles (urllib3, msgpack, setuptools) had known
   vulnerabilities. For the tests, `ensurepip` brings it back.

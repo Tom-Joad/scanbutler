@@ -17,7 +17,8 @@ interface; everything it does shows up in the container log.
    | Stacks | e.g. `/mnt/user/<share>/scan-splitter/stacks` |
    | Scanner | e.g. `/mnt/user/<share>/scan-splitter/scanner` |
    | Paperless | optional, e.g. `/mnt/user/<share>/scan-splitter/paperless` |
-   | Work | `/mnt/user/appdata/scanbutler` |
+   | Config | `/mnt/user/appdata/scanbutler` |
+   | `PUID`, `PGID` | `99`, `100` (nobody:users, like Unraid's shares) |
    | `MISTRAL_API_KEY` | your key (masked in the UI) |
    | `MISTRAL_LLM_MODEL` | `mistral-large-latest`, or a pinned version such as `mistral-large-2512` |
    | `MISTRAL_MAX_RPS` | a little below your account's requests-per-second limit for that model |
@@ -27,8 +28,10 @@ interface; everything it does shows up in the container log.
    | `PAPERLESS_URL`, `PAPERLESS_TOKEN` | optional, enable the Paperless input; see below |
    | `QUEUE_WEBHOOK_URL` | optional, e.g. a Home Assistant webhook; see the [main README](../README.md#queue-webhook-home-assistant) |
 
-   The advanced view has the remaining settings. Leave `WORK_DIR` and
-   `TMPDIR` as they are.
+   The advanced view has the remaining settings, among them `UMASK` (`002`:
+   new files are writable for the `users` group). Don't add `--init` or
+   `--user` to *Extra Parameters*: the image uses linuxserver.io's init
+   system, which sets the user from `PUID`/`PGID` itself.
 
 3. **Apply.** On first start, the container creates `inbox/`, `output/`,
    `archive/` and `failed/` under both Stacks and Scanner. The log shows
@@ -102,6 +105,22 @@ token that has the `read:packages` scope.
 
 ## Updating
 
+### From 0.x (scan-stack-splitter) to 1.0
+
+1.0 is a new container: new name, new image, linuxserver.io conventions.
+Install it from the current template as described above, then:
+
+- **Config:** point it at your old work folder (e.g.
+  `/mnt/user/appdata/scan-stack-splitter`) or copy that folder's contents
+  to the new one. It holds the plans for `rebuild` and the list of files
+  already uploaded to Paperless, which prevents duplicate uploads.
+- **Stacks, Scanner, Paperless:** the same paths as before.
+- **Variables:** take over your values (API key, model, rate limit,
+  Paperless, webhook).
+- Remove the old container once the new one runs.
+
+### Regular updates
+
 New versions are published as `ghcr.io/tom-joad/scanbutler:latest`.
 **Check for Updates** on the Docker page pulls them. A container you created
 earlier keeps its settings, so settings added to the template later do not
@@ -117,16 +136,17 @@ appear on their own. Add them with **Add another Path, Port, Variable**; the
   than that brings no further gain. See the main README under
   [System requirements](../README.md#system-requirements).
 
-- The container runs as `nobody:users` (99:100), like Unraid's shares, so
-  output files can be edited and deleted over SMB.
+- Scanbutler runs as `PUID`/`PGID`, by default `nobody:users` (99:100) like
+  Unraid's shares, with `UMASK=002`, so output files can be edited and
+  deleted over SMB.
 - If the text layer fails, `.error.txt` and the log show ocrmypdf's own
   message. A helper process `died with SIGKILL` means it ran out of memory.
   For errors that look like file-system problems (`Input/output error`,
-  missing files), point Work at the pool directly, for example
+  missing files), point Config at the pool directly, for example
   `/mnt/cache/appdata/scanbutler` instead of `/mnt/user/...`.
-- Temporary page images go to `Work/tmp` on disk, not to RAM. A 500-page
+- Temporary page images go to `Config/tmp` on disk, not to RAM. A 500-page
   stack needs a few GB there while it is processed.
-- The Work folder holds the full OCR text of every file and is never cleaned
+- The Config folder holds the full OCR text of every file and is never cleaned
   up automatically. Delete a file's folder there once its documents are fine.
 - Pages are sent to Mistral's API. Uploaded batch files are deleted from
   Mistral's storage after each job.

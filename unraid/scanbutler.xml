@@ -20,11 +20,14 @@
     a webhook such as Home Assistant. Needs a Mistral API key.
   </Overview>
   <Category>Productivity: Tools:</Category>
-  <ExtraParams>--init --user 99:100 --security-opt no-new-privileges --memory=4g</ExtraParams>
+  <ExtraParams>--security-opt no-new-privileges --memory=4g</ExtraParams>
   <Config Name="Stacks" Target="/data/stacks" Default="/mnt/user/Documents/scanbutler/stacks" Mode="rw" Description="Large scans to split. inbox/, output/, archive/ and failed/ are created here." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="Scanner" Target="/data/scanner" Default="/mnt/user/Documents/scanbutler/scanner" Mode="rw" Description="Scanner input, one document per file. Point the scanner's network-folder target at inbox/ below this path." Type="Path" Display="always" Required="true" Mask="false"/>
   <Config Name="Paperless" Target="/data/paperless" Default="/mnt/user/Documents/scanbutler/paperless" Mode="rw" Description="Optional Paperless-ngx input (needs PAPERLESS_URL): files get the text layer and are uploaded to Paperless." Type="Path" Display="always" Required="false" Mask="false"/>
-  <Config Name="Work" Target="/work" Default="/mnt/user/appdata/scanbutler" Mode="rw" Description="Per-stack OCR text, plan.json, review.md and temporary page images (several GB while a large stack is processed). Holds full document text: delete stacks you no longer need." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/scanbutler" Mode="rw" Description="Per-stack OCR text, plan.json, review.md and temporary page images (several GB while a large stack is processed). Holds full document text: delete stacks you no longer need." Type="Path" Display="always" Required="true" Mask="false"/>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User that owns new files (nobody)" Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group for new files (users)" Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="UMASK" Target="UMASK" Default="002" Mode="" Description="002: new files are writable for the users group, e.g. over SMB" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="MISTRAL_API_KEY" Target="MISTRAL_API_KEY" Default="" Mode="" Description="Mistral API key" Type="Variable" Display="always" Required="true" Mask="true"/>
   <Config Name="MISTRAL_LLM_MODEL" Target="MISTRAL_LLM_MODEL" Default="mistral-large-latest" Mode="" Description="Model for splitting and naming" Type="Variable" Display="always" Required="false" Mask="false"/>
   <Config Name="MISTRAL_MAX_RPS" Target="MISTRAL_MAX_RPS" Default="1" Mode="" Description="Requests per second, slightly below your account's limit for MISTRAL_LLM_MODEL (Mistral console: API &gt; Limits)" Type="Variable" Display="always" Required="false" Mask="false"/>
@@ -40,6 +43,4 @@
   <Config Name="SCANNER_TEXT_SOURCE" Target="SCANNER_TEXT_SOURCE" Default="tesseract" Mode="" Description="Text for naming scanner files: tesseract (free, from the text layer) or mistral (Mistral OCR, paid; worth it for handwriting or poor scans)" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="OCR_MODE" Target="OCR_MODE" Default="batch" Mode="" Description="batch: half price, minutes per job. direct: immediate, full price." Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="FILENAME_PATTERN" Target="FILENAME_PATTERN" Default="{title} {date}" Mode="" Description="{title} is required, {date} is YYYY-MM-DD" Type="Variable" Display="advanced" Required="false" Mask="false"/>
-  <Config Name="WORK_DIR" Target="WORK_DIR" Default="/work" Mode="" Description="Keep at /work (the Work path above)" Type="Variable" Display="advanced" Required="true" Mask="false"/>
-  <Config Name="TMPDIR" Target="TMPDIR" Default="/work/tmp" Mode="" Description="Temporary page images go to disk instead of RAM" Type="Variable" Display="advanced" Required="true" Mask="false"/>
 </Container>

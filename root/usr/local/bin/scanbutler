@@ -1,0 +1,11 @@
+#!/bin/sh
+# `docker exec <container> scanbutler ...` runs as root. When s6-overlay
+# manages the container, act as abc instead, with the same UMASK as the
+# watcher, so files written by a rebuild keep the PUID/PGID owner.
+if [ "$(id -u)" = 0 ] && [ "$(cat /proc/1/comm 2>/dev/null)" = "s6-svscan" ]; then
+    if [ -n "${UMASK}" ]; then
+        umask "${UMASK}"
+    fi
+    exec /command/s6-setuidgid abc python3 -m scanbutler "$@"
+fi
+exec python3 -m scanbutler "$@"

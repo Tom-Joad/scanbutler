@@ -1,0 +1,8 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+
+if [[ -z ${LSIO_NON_ROOT_USER} ]]; then
+    exec s6-setuidgid abc python3 -m scanbutler run
+else
+    exec python3 -m scanbutler run
+fi

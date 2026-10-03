@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import sys
+import tempfile
 from pathlib import Path, PurePosixPath
 
 from . import __version__, logging_setup, pdfops
@@ -27,6 +28,25 @@ def _client(settings: Settings) -> MistralClient:
         settings.request_timeout,
         max_rps=settings.max_rps,
     )
+
+
+def prepare_tmpdir(work_dir: Path) -> None:
+    """Point TMPDIR at the work folder unless it is set.
+
+    ocrmypdf renders every page into the temp dir: several GB for a large
+    stack. Inside the work folder they stay on disk instead of a RAM-backed
+    /tmp, and the folder has to exist before the first tempfile is created.
+    """
+    wanted = os.environ.get("TMPDIR") or str(work_dir / "tmp")
+    try:
+        Path(wanted).mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        fallback = work_dir / "tmp"
+        log.warning("TMPDIR not usable, using the work folder", extra={"tmpdir": wanted, "error": str(exc)})
+        fallback.mkdir(parents=True, exist_ok=True)
+        wanted = str(fallback)
+    os.environ["TMPDIR"] = wanted
+    tempfile.tempdir = None  # re-read TMPDIR on next use
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,11 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         },
     )
 
-    # ocrmypdf renders every page into the temp dir. TMPDIR may point into a
-    # mounted volume (to keep gigabytes of page images off RAM-backed /tmp),
-    # and that directory has to exist before the first tempfile is created.
-    if tmpdir := os.environ.get("TMPDIR"):
-        Path(tmpdir).mkdir(parents=True, exist_ok=True)
+    prepare_tmpdir(settings.work_dir)
 
     if command == "rebuild":
         work = Path(args.work_dir)

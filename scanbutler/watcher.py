@@ -10,6 +10,7 @@ workers stay within the same request-rate limit.
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import signal
 import threading
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 
 HEARTBEAT = Path("/tmp/scanbutler.heartbeat")
 PAPERLESS_RETRY_SECONDS = 300
+FOLDER_RETRY_SECONDS = 60
 # A PDF without its end is taken as still being written; only after this long
 # without change is it processed anyway (and then fails with a clear error).
 INCOMPLETE_GRACE_SECONDS = 600
@@ -199,12 +201,31 @@ class InboxWatcher:
                     break
                 pool.submit(self.process, path)
 
+    def _create(self, folders: list[Path]) -> bool:
+        try:
+            for directory in folders:
+                directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            log.error(
+                "cannot create the input folders; check that PUID/PGID may write there",
+                extra={
+                    "profile": self.profile.name,
+                    "error": f"{type(exc).__name__}: {exc}",
+                    "uid": os.getuid(),
+                    "gid": os.getgid(),
+                    "retry_s": FOLDER_RETRY_SECONDS,
+                },
+            )
+            return False
+        return True
+
     def run(self) -> None:
         folders = [self.profile.inbox, self.profile.archive, self.profile.failed]
         if not self.profile.upload:
             folders.append(self.profile.output)
-        for directory in folders:
-            directory.mkdir(parents=True, exist_ok=True)
+        while not self._create(folders):
+            if self.stop.wait(FOLDER_RETRY_SECONDS):
+                return
         log.info("watching inbox", extra={"profile": self.profile.name, "inbox": str(self.profile.inbox)})
         while not self.stop.is_set():
             try:

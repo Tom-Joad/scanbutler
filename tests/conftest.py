@@ -100,6 +100,8 @@ def settings(tmp_path, monkeypatch) -> Settings:
     env = {
         "MISTRAL_API_KEY": "test-key",
         "DATA_DIR": str(tmp_path / "data"),
+        # Explicit: inside the image /config exists and would be shared by all tests.
+        "WORK_DIR": str(tmp_path / "data" / "work"),
         "OCR_CHUNK_PAGES": "3",
         "OCR_CONCURRENCY": "1",
         "LLM_CONCURRENCY": "1",

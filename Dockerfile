@@ -1,6 +1,7 @@
-# Debian 13 (trixie): bookworm is oldstable and leaves many CVEs unfixed.
+# linuxserver.io's Debian 13 (trixie) base: s6-overlay, PUID/PGID/UMASK/TZ,
+# the abc user and docker mods, as in every linuxserver.io container.
 # Pinned by digest (a multi-arch index); Dependabot proposes new digests.
-FROM python:3.12-slim-trixie@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
+FROM ghcr.io/linuxserver/baseimage-debian:trixie@sha256:277fe892c46a57688442df06a49ce662e0ddafde16802aaff695cc341d082412
 
 # image.source is what makes a GHCR package inherit the repository's
 # visibility instead of staying private on its own.
@@ -10,15 +11,17 @@ LABEL org.opencontainers.image.source="https://github.com/Tom-Joad/scanbutler" \
       org.opencontainers.image.licenses="MIT"
 
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app
 
 # Tesseract and Ghostscript power the searchable text layer; unpaper backs
-# ocrmypdf's --clean.
-# The upgrade picks up Debian security fixes newer than the pinned base image.
+# ocrmypdf's --clean. The upgrade picks up Debian security fixes newer than
+# the pinned base image. procps provides pwdx, which the base image's
+# with-contenv needs to apply UMASK to services; the trixie base lacks it.
 RUN apt-get update \
  && apt-get upgrade --yes \
  && apt-get install --yes --no-install-recommends \
-      tesseract-ocr ghostscript unpaper curl ca-certificates \
+      python3 python3-venv tesseract-ocr ghostscript unpaper procps \
  && rm -rf /var/lib/apt/lists/*
 
 # Replace Debian's default models with tessdata_best: noticeably better on
@@ -35,32 +38,31 @@ RUN set -eu; \
       curl -fsSL -o "$dir/$1.traineddata" \
         "https://github.com/tesseract-ocr/tessdata_best/raw/${TESSDATA_BEST_TAG}/$1.traineddata"; \
       echo "$2  $dir/$1.traineddata" | sha256sum -c -; \
-    done; \
-    apt-get purge --yes curl && apt-get autoremove --yes
+    done
 
-WORKDIR /app
-
-COPY requirements.txt ./
+# /lsiopy is linuxserver.io's place for a Python venv and already on PATH.
 # pip is only needed to build the image. It is removed afterwards: the
 # libraries it bundles (urllib3, msgpack, setuptools) lag behind and would
 # show up in every vulnerability scan, without ever running.
-RUN pip install --no-cache-dir --requirement requirements.txt \
- && pip uninstall --yes pip
+COPY requirements.txt /app/
+RUN python3 -m venv /lsiopy \
+ && /lsiopy/bin/pip install --no-cache-dir --requirement /app/requirements.txt \
+ && /lsiopy/bin/pip uninstall --yes pip
 
-COPY scanbutler ./scanbutler
-RUN printf '#!/bin/sh\nexec python -m scanbutler "$@"\n' > /usr/local/bin/scanbutler \
- && chmod +x /usr/local/bin/scanbutler
+COPY scanbutler /app/scanbutler
+# s6 services (init-scanbutler-config, svc-scanbutler) and the wrappers.
+COPY root/ /
+RUN chmod +x /usr/local/bin/scanbutler \
+      /etc/s6-overlay/s6-rc.d/init-scanbutler-config/run /etc/s6-overlay/s6-rc.d/svc-scanbutler/run \
+ && printf 'Scanbutler version: %s\n' "$(python3 -c 'import scanbutler; print(scanbutler.__version__)')" > /build_version
 
-ENV PYTHONPATH=/app
+# Plans, caches, the upload ledger and temporary page images.
+VOLUME /config
 
-# Overridden by `user:` in docker-compose to match the owner of the shares.
-RUN useradd --system --uid 10001 --no-create-home scanbutler
-USER scanbutler
+# The watcher touches the heartbeat every 30 s, also while a long stack is
+# being processed.
+HEALTHCHECK --interval=60s --timeout=5s --start-period=90s --retries=3 \
+    CMD python3 -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/scanbutler.heartbeat') < 300 else 1)"
 
-# A watcher thread touches the heartbeat every 30 s, also while a long
-# stack is being processed.
-HEALTHCHECK --interval=60s --timeout=5s --start-period=60s --retries=3 \
-    CMD python -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/scanbutler.heartbeat') < 300 else 1)"
-
-ENTRYPOINT ["scanbutler"]
-CMD ["run"]
+# The entrypoint stays the base image's /init (s6-overlay), which must run as
+# PID 1: don't add `--init` to `docker run`.
