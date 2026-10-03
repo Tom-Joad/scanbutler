@@ -4,6 +4,18 @@ All notable changes to this project are listed here. Versions follow
 [semantic versioning](https://semver.org/); while the major version is 0,
 minor versions may change behaviour or settings.
 
+## [0.11.1] - 2026-10-03
+
+### Fixed
+- `OCRMYPDF_JOBS=auto` now respects Docker's `--cpus` and `--cpuset-cpus`
+  limits. Before, it counted every core of the host. A container limited to
+  2 CPUs on a 12-core host would have started up to 12 parallel OCR pages.
+  The startup log now also shows the CPUs it found.
+
+### Docs
+- Sizing rule: full speed needs about 1 GB + 0.75 GB × CPU cores. More memory
+  brings no further gain.
+
 ## [0.11.0] - 2026-10-03
 
 ### Added
@@ -167,6 +179,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[0.11.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.9.1...v0.10.0
 [0.9.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.9.0...v0.9.1

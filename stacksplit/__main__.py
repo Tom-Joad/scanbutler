@@ -9,7 +9,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 from . import __version__, logging_setup, pdfops
-from .config import ConfigError, Settings, memory_limit_bytes
+from .config import ConfigError, Settings, available_cpus, memory_limit_bytes
 from .mistral import MistralClient
 from .paperless import PaperlessClient
 from .pipeline import process_for_paperless, process_stack, rebuild
@@ -62,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
             "version": __version__,
             "command": command,
             "memory_gb": round(memory / 2**30, 1) if memory else None,
+            "cpus": available_cpus(),
             "ocr_jobs_total": settings.ocrmypdf_jobs,
             "ocr_jobs": {p.name: settings.jobs_for(p) for p in settings.profiles},
         },

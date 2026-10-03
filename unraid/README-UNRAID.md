@@ -112,7 +112,9 @@ appear on their own. Add them with **Add another Path, Port, Variable**; the
 
 - The template limits the container to 4 GB (`--memory=4g` in *Extra
   Parameters*), and OCR adapts to that limit. 1 GB is the tested minimum: it
-  is slower, but it doesn't fail. See the main README under
+  is slower, but it doesn't fail. For full speed, allow about
+  1 GB + 0.75 GB per CPU core, for example 5.5 GB on a 6-core server. More
+  than that brings no further gain. See the main README under
   [System requirements](../README.md#system-requirements).
 
 - The container runs as `nobody:users` (99:100), like Unraid's shares, so

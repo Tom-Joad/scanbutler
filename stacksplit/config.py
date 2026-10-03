@@ -81,6 +81,34 @@ def memory_limit_bytes() -> int | None:
     return None
 
 
+def available_cpus() -> int:
+    """CPUs this container may use: its CPU set and any --cpus quota (cgroup v2/v1).
+
+    os.cpu_count() reports every core of the host, even with --cpus=2.
+    """
+    try:
+        cpus = len(os.sched_getaffinity(0))  # honours --cpuset-cpus
+    except (AttributeError, OSError):
+        cpus = os.cpu_count() or 1
+    quota = None
+    try:
+        limit, period = Path("/sys/fs/cgroup/cpu.max").read_text().split()[:2]
+        if limit != "max":
+            quota = int(limit) / int(period)
+    except (OSError, ValueError):
+        try:
+            limit = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text())
+            period = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text())
+            if limit > 0:
+                quota = limit / period
+        except (OSError, ValueError):
+            pass
+    if quota is not None:
+        # --cpus=1.5 allows one and a half cores' worth of time: one job each.
+        cpus = min(cpus, max(1, int(quota)))
+    return max(1, cpus)
+
+
 def auto_jobs(memory_bytes: int | None, cpus: int) -> int:
     """Parallel OCR pages that fit the memory: less memory just means slower."""
     if memory_bytes is None:
@@ -278,7 +306,7 @@ class Settings:
             ocrmypdf_enabled=_bool("OCRMYPDF_ENABLED", True),
             ocrmypdf_languages=_str("OCRMYPDF_LANGUAGES", "deu+eng"),
             ocrmypdf_jobs=(
-                auto_jobs(memory_limit_bytes(), os.cpu_count() or 1)
+                auto_jobs(memory_limit_bytes(), available_cpus())
                 if _str("OCRMYPDF_JOBS", "auto").lower() == "auto"
                 else _int("OCRMYPDF_JOBS", 1, minimum=1)
             ),

@@ -80,9 +80,16 @@ Under the hood:
 
 The container adapts to its memory. With `OCRMYPDF_JOBS=auto`, the default,
 it runs as many OCR pages in parallel as its memory limit allows: 1 GB as a
-base plus 0.75 GB per page, at most one per CPU core. All inputs share that
-budget. A run that doesn't fit waits for another to finish. Less memory
-therefore makes processing slower, never makes it fail.
+base plus 0.75 GB per page. It never runs more than one page per CPU the
+container may use, and Docker's `--cpus` and `--cpuset-cpus` limits are
+respected. All inputs share that budget. A run that doesn't fit waits for
+another to finish. Less memory therefore makes processing slower, never makes
+it fail.
+
+Beyond a certain point, more memory no longer helps: the CPUs become the
+limit. Full speed needs about **1 GB + 0.75 GB × CPU cores**, so 5.5 GB for 6
+cores, or 7 GB for 8. The startup log shows the outcome:
+`"memory_gb":6.0,"cpus":6,"ocr_jobs_total":6`.
 
 Measured with a worst-case file: four A4 pages, each holding a colour image
 at 1550 dpi. The images are downsampled to 600 dpi first, see
@@ -303,7 +310,7 @@ them with comments.
 |---|---|---|
 | `OCRMYPDF_ENABLED` | `true` | `false` keeps the scan's own text layer, if any |
 | `OCRMYPDF_LANGUAGES` | `deu+eng` | Tesseract languages; only `deu` and `eng` ship as best models |
-| `OCRMYPDF_JOBS` | `auto` | Parallel OCR pages, shared by all inputs; `auto` follows the memory limit, see [System requirements](#system-requirements) |
+| `OCRMYPDF_JOBS` | `auto` | Parallel OCR pages, shared by all inputs; `auto` follows the memory and CPU limits, see [System requirements](#system-requirements) |
 | `OCRMYPDF_MAX_IMAGE_DPI` | `600` | Images sharper than this are downsampled before OCR; plenty for text, and it bounds each page's memory. `0` disables it |
 | `OCRMYPDF_EXTRA_ARGS` | — | Appended to the ocrmypdf call |
 | `OCRMYPDF_MAX_OCR_MPIXELS` | `50` | Larger page images are downsampled for OCR only. Peak memory is about jobs × 16 bytes × this value; A4 at 600 dpi is about 35 |
