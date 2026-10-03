@@ -622,8 +622,16 @@ docker run --rm --entrypoint sh -v "$PWD:/src" -w /src scanbutler:dev \
   -c "python3 -m ensurepip >/dev/null && python3 -m pip install -q pytest && python3 -m pytest -q"
 ```
 
-The tests replace Mistral with a fake and need no API key. CI runs them
-together with `pip-audit` and `gitleaks` on every push. Images are built only
+The tests replace Mistral with a fake and need no API key. A smoke test
+checks the built image itself (watcher, health check, OCR models, file
+owners), also without a key:
+
+```bash
+tests/smoke.sh scanbutler:dev
+```
+
+CI runs both together with `pip-audit`, shellcheck and `gitleaks` on every
+push. Images are built only
 for version tags (`v*`), for `linux/amd64` and `linux/arm64`. Each image is
 signed with cosign and ships an SBOM and provenance.
 
