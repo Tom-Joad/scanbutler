@@ -16,6 +16,9 @@ PUID=$(id -u); PGID=$(id -g)
 
 cleanup() {
     docker rm -f "$NAME" >/dev/null 2>&1 || true
+    # The container writes some files as root (e.g. the crontab), which the
+    # calling user can't remove; clean up through a container.
+    docker run --rm --entrypoint sh -v "$WORK:/w" "$IMAGE" -c 'rm -rf /w/*' >/dev/null 2>&1 || true
     rm -rf "$WORK"
 }
 trap cleanup EXIT
