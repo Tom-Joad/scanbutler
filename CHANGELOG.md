@@ -19,6 +19,15 @@ minor versions may change behaviour or settings.
   webhook's `processing` can therefore be more than 1.
 - The startup log shows `ocr_priority` instead of the fixed `ocr_jobs` shares.
 
+### Fixed
+- A PDF still being written is no longer processed and moved to `failed/`.
+  A ScanSnap pausing for more than `STABLE_SECONDS` while writing a stack
+  left a cut-off file, which failed with `InputFileError`. Now a file is
+  only picked up once it ends in `%%EOF`, and a file that changes while it
+  is processed stays in the inbox for the next round. A PDF that stays
+  incomplete for 10 minutes is processed anyway and fails with a clear
+  message.
+
 ### Docs
 - A note on Fujitsu/Ricoh ScanSnap scanners: scanning straight to a network
   folder, they save image-only PDFs, and the scanner input makes them

@@ -188,3 +188,42 @@ def test_reporter_counts_several_files_in_progress(settings):
     assert reporter.snapshot()["profiles"]["scanner"]["processing"] == 1
 
 
+
+
+def test_a_cut_off_pdf_waits_until_it_is_complete(settings):
+    stacks = settings.profile("stacks")
+    stacks.inbox.mkdir(parents=True)
+    whole = stacks.inbox.parent / "whole.pdf"
+    make_pdf(whole, 3)
+    data = whole.read_bytes()
+    target = stacks.inbox / "scan.pdf"
+    target.write_bytes(data[: len(data) // 2])  # the scanner paused mid-file
+    watcher = InboxWatcher(settings, stacks, FakeBackend(["LETTER dated report"] * 3), threading.Event())
+
+    watcher.poll_once()
+    watcher.poll_once()
+    assert target.exists() and not stacks.failed.exists()
+
+    target.write_bytes(data)  # the scanner finished
+    watcher.poll_once()
+    assert not target.exists() and (stacks.archive / "scan.pdf").exists()
+
+
+def test_a_file_that_changes_while_processing_stays_in_the_inbox(settings, monkeypatch):
+    import stacksplit.watcher as watcher_module
+
+    scanner = settings.profile("scanner")
+    scanner.inbox.mkdir(parents=True)
+    target = scanner.inbox / "scan.pdf"
+    make_pdf(target, 2)
+
+    def still_writing(path, *args, **kwargs):
+        with path.open("ab") as handle:
+            handle.write(b"\n% more pages\n%%EOF\n")
+        raise RuntimeError("ocrmypdf failed in every mode. scan: exit code 2: InputFileError")
+
+    monkeypatch.setattr(watcher_module, "process_stack", still_writing)
+    InboxWatcher(settings, scanner, FakeBackend([]), threading.Event()).poll_once()
+
+    assert target.exists()
+    assert not scanner.failed.exists() or not any(scanner.failed.iterdir())

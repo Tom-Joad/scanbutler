@@ -287,7 +287,7 @@ them with comments.
 | `WORK_DIR` | `$DATA_DIR/work` | OCR results, plans and review files |
 | `TMPDIR` | `/tmp` | Temporary page images; point it at a disk for large stacks |
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
-| `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up |
+| `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up. A PDF that isn't completely written (no `%%EOF` at its end) waits up to 10 minutes longer |
 
 **Paperless-ngx input**
 

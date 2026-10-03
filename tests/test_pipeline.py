@@ -127,7 +127,7 @@ def test_watcher_archives_success_and_quarantines_failure(settings):
     folder = stacks.inbox / "Patient A"
     folder.mkdir(parents=True)
     make_pdf(folder / "good.pdf", len(STACK))
-    (folder / "broken.pdf").write_bytes(b"not a pdf")
+    (folder / "broken.pdf").write_bytes(b"not a pdf\n%%EOF\n")  # complete, but damaged
 
     watcher = InboxWatcher(settings, stacks, FakeBackend(STACK), threading.Event())
     watcher.poll_once()

@@ -233,7 +233,25 @@ def _ocrmypdf_error(returncode: int, stderr: str) -> str:
         if any(word in line.lower() for word in ("error", "exception", "failed", "errno", "not ", "cannot", "unable"))
     ]
     detail = " | ".join((telling or lines)[-6:])
+    if returncode == 2 and "InputFileError" in stderr:
+        # ocrmypdf prints nothing more than the exception's name here.
+        detail += " (the PDF could not be read: damaged, or not completely written)"
     return f"exit code {returncode}: {detail[-1200:]}"
+
+
+def looks_complete(path: Path) -> bool:
+    """Whether a PDF has been written to the end: its last bytes hold %%EOF.
+
+    A scanner that pauses while writing leaves a file that stays the same
+    size for a while but is cut off.
+    """
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, 2)
+            handle.seek(max(0, handle.tell() - 2048))
+            return b"%%EOF" in handle.read()
+    except OSError:
+        return False
 
 
 def make_searchable(

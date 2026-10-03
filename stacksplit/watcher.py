@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 
 from . import priority
 from .config import Profile, Settings
+from .pdfops import looks_complete
 from .naming import unique_path
 from .notify import QueueReporter
 from .pause import PauseGate, limit_error_in
@@ -30,6 +31,9 @@ log = logging.getLogger(__name__)
 
 HEARTBEAT = Path("/tmp/stacksplit.heartbeat")
 PAPERLESS_RETRY_SECONDS = 300
+# A PDF without its end is taken as still being written; only after this long
+# without change is it processed anyway (and then fails with a clear error).
+INCOMPLETE_GRACE_SECONDS = 600
 
 
 class InboxWatcher:
@@ -54,6 +58,7 @@ class InboxWatcher:
         self._retry_after = 0.0
         # path -> (size, mtime_ns, monotonic time the file last changed)
         self._seen: dict[Path, tuple[int, int, float]] = {}
+        self._incomplete_logged: set[tuple[Path, int]] = set()
 
     def _candidates(self) -> list[Path]:
         inbox = self.profile.inbox
@@ -73,8 +78,21 @@ class InboxWatcher:
         previous = self._seen.get(path)
         if previous is None or previous[:2] != (size, mtime):
             self._seen[path] = (size, mtime, now)
-            return self.settings.stable_seconds == 0 and size > 0
-        return size > 0 and now - previous[2] >= self.settings.stable_seconds
+            if not (self.settings.stable_seconds == 0 and size > 0):
+                return False
+            unchanged = 0.0
+        else:
+            unchanged = now - previous[2]
+            if size == 0 or unchanged < self.settings.stable_seconds:
+                return False
+        if looks_complete(path):
+            return True
+        if unchanged >= max(INCOMPLETE_GRACE_SECONDS, self.settings.stable_seconds):
+            return True  # truly damaged: let it fail with an error file
+        if previous is not None and previous[:2] == (size, mtime) and (path, size) not in self._incomplete_logged:
+            self._incomplete_logged.add((path, size))
+            log.info("file not completely written yet, waiting", extra={"profile": self.profile.name, "file": path.name})
+        return False
 
     def _move(self, src: Path, root: Path, folder: PurePosixPath) -> Path:
         target_dir = root / folder
@@ -83,8 +101,17 @@ class InboxWatcher:
         shutil.move(str(src), target)
         return target
 
+    @staticmethod
+    def _signature(path: Path) -> tuple[int, int] | None:
+        try:
+            stat = path.stat()
+        except OSError:
+            return None
+        return stat.st_size, stat.st_mtime_ns
+
     def process(self, path: Path) -> None:
         folder = PurePosixPath(path.parent.relative_to(self.profile.inbox).as_posix())
+        before = self._signature(path)
         if self.reporter:
             self.reporter.set_processing(self.profile.name, True)
         try:
@@ -110,6 +137,13 @@ class InboxWatcher:
                 # Not this file's fault: leave it in the inbox and stop
                 # sending more until the account accepts work again.
                 self.gate.pause(str(limit))
+                return
+            if self._signature(path) != before:
+                # Still being written when it was picked up: not a broken file.
+                log.warning(
+                    "file changed while processing, trying again later",
+                    extra={"profile": self.profile.name, "source": (folder / path.name).as_posix(), "error": str(exc)[:300]},
+                )
                 return
             if self.profile.uses_mistral:  # a plain Paperless upload says nothing about Mistral
                 self.gate.done()
