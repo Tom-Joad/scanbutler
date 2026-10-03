@@ -137,11 +137,17 @@ docker compose run --rm scan-stack-splitter process /data/some.pdf --profile sta
    - **Pure scans** (no text at all): `--force-ocr`. Pages are deskewed, the
      image Tesseract reads is cleaned, and poor scans are upsampled to 300
      dpi.
-   - **PDFs that already contain text**: `--redo-ocr`. This covers born-digital
-     PDFs such as online bank statements, and scans that carry the scanner's
-     own OCR. An old OCR layer is replaced, while real digital text stays as it
-     is. Forcing OCR would turn such pages into pictures of themselves, many
-     times the size.
+   - **Tagged PDFs**, which carry a logical structure tree: kept as they are.
+     These are born-digital files such as office documents or online bank
+     statements. Their text is the original, and re-OCR would discard the
+     structure.
+   - **Other PDFs that already contain text**, such as scans that carry the
+     scanner's own OCR: `--redo-ocr`. An old OCR layer is replaced, while real
+     digital text stays as it is. Forcing OCR would turn such pages into
+     pictures of themselves, many times the size. There is no image cleaning
+     in this mode: ocrmypdf rasterizes at the resolution of the sharpest image
+     on a page, and cleaning a page with a high-resolution logo at that size
+     can exhaust the memory.
 
    If a mode fails, a simpler one is tried before the file counts as failed.
    The last resort OCRs only pages without text and does no image processing.

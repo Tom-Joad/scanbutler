@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 
+import pikepdf
 import pytest
 
 from stacksplit import pdfops
@@ -13,8 +14,26 @@ from .test_text_source import make_text_pdf
 def test_mode_choice_depends_on_existing_text():
     assert [name for name, _ in pdfops.ocr_modes(has_text=False)] == ["scan", "redo", "plain"]
     assert [name for name, _ in pdfops.ocr_modes(has_text=True)] == ["redo", "plain"]
-    # --redo-ocr refuses --deskew; it must never be combined with it.
-    assert "--deskew" not in pdfops.REDO_MODE[1]
+    assert [name for name, _ in pdfops.ocr_modes(has_text=True, tagged=True)] == ["plain"]
+    # --redo-ocr refuses --deskew; --clean (unpaper) is for scans only and ran
+    # out of memory on a born-digital page with a high-resolution logo.
+    assert "--deskew" not in pdfops.REDO_MODE[1] and "--clean" not in pdfops.REDO_MODE[1]
+
+
+def test_tagged_pdf_is_kept_as_it_is(tmp_path, monkeypatch):
+    src = tmp_path / "statement.pdf"
+    make_text_pdf(src, ["Account statement 9/2026"])
+
+    with pikepdf.open(src, allow_overwriting_input=True) as pdf:
+        pdf.Root.MarkInfo = pikepdf.Dictionary(Marked=True)
+        pdf.Root.StructTreeRoot = pdf.make_indirect(pikepdf.Dictionary(Type=pikepdf.Name.StructTreeRoot))
+        pdf.save(src)
+    assert pdfops.is_tagged(src)
+    calls = fake_ocrmypdf(monkeypatch, [(0, "")])
+
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", 2, "")
+
+    assert len(calls) == 1 and "--skip-text" in calls[0]
 
 
 def fake_ocrmypdf(monkeypatch, outcomes):

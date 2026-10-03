@@ -4,6 +4,16 @@ All notable changes to this project are listed here. Versions follow
 [semantic versioning](https://semver.org/); while the major version is 0,
 minor versions may change behaviour or settings.
 
+## [0.9.1] - 2026-10-03
+
+### Fixed
+- A born-digital bank statement made unpaper run out of memory. ocrmypdf
+  had rasterized a page at about 1550 dpi because of a high-resolution logo,
+  and the kernel killed unpaper. Two changes follow from it:
+  - Tagged PDFs, which carry a structure tree, are now kept as they are and
+    not re-OCR'd at all.
+  - `--redo-ocr` no longer cleans images; cleaning stays with pure scans.
+
 ## [0.9.0] - 2026-10-03
 
 ### Changed
@@ -123,6 +133,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[0.9.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.6.0...v0.7.0

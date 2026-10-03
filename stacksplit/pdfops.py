@@ -72,15 +72,31 @@ def ink_coverage(path: Path, dpi: int = 50) -> list[float]:
 # or scanned with the scanner's own OCR) uses --redo-ocr instead: it replaces
 # invisible OCR text but keeps real digital text. --force-ocr would turn such
 # a page into a picture of itself, many times the size. --redo-ocr can't be
-# combined with --deskew.
+# combined with --deskew, and it skips --clean: unpaper is meant for scans,
+# and ocrmypdf rasterizes at the resolution of the sharpest image on a page,
+# so one high-resolution logo made unpaper work at ~1550 dpi until the
+# kernel killed it.
 SCAN_MODE = ("scan", ["--force-ocr", "--rotate-pages", "--deskew", "--clean", "--oversample", "300"])
-REDO_MODE = ("redo", ["--redo-ocr", "--rotate-pages", "--clean", "--oversample", "300"])
-# Last resort: only OCR pages without any text, with no image processing.
+REDO_MODE = ("redo", ["--redo-ocr", "--rotate-pages", "--oversample", "300"])
+# Only OCR pages without any text, with no image processing. For a tagged
+# (structured, born-digital) PDF this keeps the file as it is.
 PLAIN_MODE = ("plain", ["--skip-text"])
 
 
-def ocr_modes(has_text: bool) -> list[tuple[str, list[str]]]:
+def ocr_modes(has_text: bool, tagged: bool = False) -> list[tuple[str, list[str]]]:
+    if tagged:
+        # Office documents, bank statements and the like: the text is the
+        # original, and re-OCR would discard the PDF's structure tree.
+        return [PLAIN_MODE]
     return [REDO_MODE, PLAIN_MODE] if has_text else [SCAN_MODE, REDO_MODE, PLAIN_MODE]
+
+
+def is_tagged(path: Path) -> bool:
+    """Whether the PDF carries a logical structure tree (a "Tagged PDF")."""
+    with pikepdf.open(path) as pdf:
+        mark_info = pdf.Root.get("/MarkInfo")
+        marked = bool(mark_info.get("/Marked", False)) if isinstance(mark_info, pikepdf.Dictionary) else False
+        return "/StructTreeRoot" in pdf.Root or marked
 
 
 def _ocrmypdf_error(returncode: int, stderr: str) -> str:
@@ -105,12 +121,13 @@ def make_searchable(src: Path, dst: Path, languages: str, jobs: int, extra_args:
     tmp = dst.with_name(dst.name + ".tmp.pdf")
     try:
         has_text = any(text.strip() for text in page_texts(src))
+        tagged = has_text and is_tagged(src)
     except Exception:  # noqa: BLE001 - an unreadable file fails in ocrmypdf with a clearer message
-        has_text = False
-    log.info("text layer started", extra={"file": src.name, "has_text": has_text})
+        has_text = tagged = False
+    log.info("text layer started", extra={"file": src.name, "has_text": has_text, "tagged": tagged})
 
     errors = []
-    for name, options in ocr_modes(has_text):
+    for name, options in ocr_modes(has_text, tagged):
         cmd = [
             "ocrmypdf",
             *options,
