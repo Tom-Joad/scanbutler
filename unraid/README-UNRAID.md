@@ -73,8 +73,9 @@ token that has the `read:packages` scope.
 ### Paperless
 
 - With `PAPERLESS_URL` and `PAPERLESS_TOKEN` set, files in `paperless/inbox/`
-  get the text layer and are uploaded to Paperless-ngx. Paperless, or its AI
-  tagger, does the naming and tagging.
+  get the text layer and are uploaded to Paperless-ngx. Paperless, or an AI tagger
+  such as [Zettelrobbe](https://github.com/admonstrator/zettelrobbe), does the
+  naming and tagging.
 - `PAPERLESS_URL` must be reachable from inside the container. For a
   Paperless container on the same server, that is usually
   `http://<server-ip>:8000`. `localhost` does not work, because it would
