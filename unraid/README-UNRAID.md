@@ -130,7 +130,9 @@ appear on their own. Add them with **Add another Path, Port, Variable**; the
   `/mnt/cache/appdata/scanbutler` instead of `/mnt/user/...`.
 - Temporary page images go to `Config/tmp` on disk, not to RAM. A 500-page
   stack needs a few GB there while it is processed.
-- The Config folder holds the full OCR text of every file and is never cleaned
-  up automatically. Delete a file's folder there once its documents are fine.
+- The Config folder holds the full OCR text and a searchable copy of every
+  file. A processed file's folder is deleted after `WORK_RETENTION_DAYS`
+  (30 days); until then, `rebuild` can re-cut it. Folders of failed files
+  stay until you delete them.
 - Pages are sent to Mistral's API. Uploaded batch files are deleted from
   Mistral's storage after each job.

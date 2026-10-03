@@ -5,6 +5,18 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.1.0] - 2026-10-03
+
+### Added
+- **`WORK_RETENTION_DAYS`** (default 30): the work folder of a processed
+  file is deleted that many days after it was finished. Each one holds a
+  searchable copy of its input and the full OCR text, so without cleanup the
+  work folder grew as fast as the archive. Until then, `rebuild` can re-cut
+  the file; a `rebuild` restarts the count. Folders of failed or interrupted
+  files, a file being processed, the Paperless upload ledger and temporary
+  files are never touched. `0` keeps everything. The cleanup runs at start
+  and every six hours, and logs `work folders cleaned` with the space freed.
+
 ## [1.0.0] - 2026-10-03
 
 First stable release. Settings, folder layout, file naming, `plan.json` and
@@ -251,6 +263,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v1.0.0
 [0.12.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.0...v0.11.1

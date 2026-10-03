@@ -311,6 +311,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
 | `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` | `mistral` / `tesseract` | Text for splitting and naming: `mistral` (Mistral OCR) or `tesseract` (free, from the text layer). The scanner falls back to `mistral` when `OCRMYPDF_ENABLED=false` |
 | `WORK_DIR` | `/config` | OCR results, plans and review files |
+| `WORK_RETENTION_DAYS` | `30` | Days after which the work folder of a processed file is deleted; `rebuild` works until then. A `rebuild` restarts the count. `0` keeps everything |
 | `TMPDIR` | `$WORK_DIR/tmp` | Temporary page images, several GB for a large stack; on disk, not in RAM |
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
 | `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up. A PDF that isn't completely written (no `%%EOF` at its end) waits up to 10 minutes longer |
@@ -594,9 +595,10 @@ naming. Only use this for documents you are entitled to process that way. If
 the documents belong to someone else, get their consent first, especially for
 health or financial records.
 
-- The work directories hold the full OCR text of every input file. There is
-  no automatic cleanup, so delete a file's work directory once its documents
-  are fine.
+- The work directories hold the full OCR text of every input file and a
+  searchable copy of it. They are deleted `WORK_RETENTION_DAYS` (30) days
+  after the file was processed; until then, `rebuild` can re-cut it. Folders
+  of failed files stay until you delete them.
 - Logs contain file names, page numbers and counts, never document text.
 - The Paperless input keeps no copy once a document is confirmed in
   Paperless. Only the register of uploaded originals remains: checksum, file

@@ -19,7 +19,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
-from . import priority
+from . import priority, retention
 from .config import Profile, Settings
 from .pdfops import looks_complete
 from .naming import unique_path
@@ -273,8 +273,16 @@ def run_all(settings: Settings, backend) -> None:
         worker.start()
 
     # The main thread keeps the healthcheck heartbeat going; a single stack
-    # can take an hour, which must not count as hung.
+    # can take an hour, which must not count as hung. It also clears out old
+    # work folders, at start and then every few hours.
+    next_cleanup = 0.0
     while not stop.is_set() and any(worker.is_alive() for worker in workers):
         HEARTBEAT.touch()
+        if time.monotonic() >= next_cleanup:
+            next_cleanup = time.monotonic() + retention.CHECK_SECONDS
+            try:
+                retention.clean(settings)
+            except Exception:  # noqa: BLE001 - cleanup must never stop the watcher
+                log.exception("work folder cleanup failed")
         stop.wait(30)
     log.info("stopped")

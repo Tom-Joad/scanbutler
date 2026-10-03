@@ -42,5 +42,6 @@
   <Config Name="STACKS_TEXT_SOURCE" Target="STACKS_TEXT_SOURCE" Default="mistral" Mode="" Description="Text for splitting and naming stacks: mistral (Mistral OCR, paid) or tesseract (free, from the text layer)" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="SCANNER_TEXT_SOURCE" Target="SCANNER_TEXT_SOURCE" Default="tesseract" Mode="" Description="Text for naming scanner files: tesseract (free, from the text layer) or mistral (Mistral OCR, paid; worth it for handwriting or poor scans)" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="OCR_MODE" Target="OCR_MODE" Default="batch" Mode="" Description="batch: half price, minutes per job. direct: immediate, full price." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="WORK_RETENTION_DAYS" Target="WORK_RETENTION_DAYS" Default="30" Mode="" Description="Days after which a processed file's work folder in Config is deleted (rebuild works until then). 0 keeps everything" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="FILENAME_PATTERN" Target="FILENAME_PATTERN" Default="{title} {date}" Mode="" Description="{title} is required, {date} is YYYY-MM-DD" Type="Variable" Display="advanced" Required="false" Mask="false"/>
 </Container>

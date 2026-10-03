@@ -18,7 +18,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from . import boundaries, metadata, pdfops, priority
+from . import boundaries, metadata, pdfops, priority, retention
 from .config import Profile, Settings
 from .naming import build_stem, unique_path
 from .llm_cache import CachedChat
@@ -305,6 +305,13 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend,
     """Run the whole pipeline for one input file. Returns its work directory."""
     digest = sha256(src)
     work = work_dir_for(settings, profile, folder, src, digest)
+    with retention.in_use(work):
+        return _process_stack(src, folder, settings, backend, profile, digest, work)
+
+
+def _process_stack(
+    src: Path, folder: PurePosixPath, settings: Settings, backend, profile: Profile, digest: str, work: Path
+) -> Path:
     work.mkdir(parents=True, exist_ok=True)
     source = (folder / src.name).as_posix()
     log.info("stack started", extra={"profile": profile.name, "source": source, "work_dir": str(work)})
