@@ -1,6 +1,7 @@
 # scan-stack-splitter
 
 [![Build and push image](https://github.com/Tom-Joad/scan-stack-splitter/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/Tom-Joad/scan-stack-splitter/actions/workflows/build-and-push.yml)
+[![Latest release](https://img.shields.io/github/v/release/Tom-Joad/scan-stack-splitter)](https://github.com/Tom-Joad/scan-stack-splitter/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Turn scanned paper into searchable PDFs, one per document, named after their
@@ -73,6 +74,7 @@ Under the hood:
 - [Privacy](#privacy)
 - [Unraid](#unraid)
 - [Development](#development)
+- [Contributing](#contributing)
 
 ## System requirements
 
@@ -601,10 +603,22 @@ signed with cosign and ships an SBOM and provenance.
 See [CHANGELOG.md](CHANGELOG.md) for the release history and
 [SECURITY.md](SECURITY.md) for reporting vulnerabilities.
 
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. Please **never attach real
+documents**, OCR text or unredacted file names to an issue. The log lines and
+settings the issue form asks for are almost always enough. If a problem only
+shows with one particular file, describe it (pages, scanner, what is special
+about it) instead of sharing it.
+
+For pull requests: keep the tests passing (see [Development](#development)),
+add a test for new behaviour, and add a line to the changelog.
+
 ## Disclaimer
 
 This is an independent project, not affiliated with or endorsed by Mistral
-AI or any scanner manufacturer. Product names belong to their owners.
+AI, Paperless-ngx or any scanner manufacturer. Product names belong to their
+owners.
 
 Splitting and naming are automated and can be wrong. Check `review.md` and
 the results before relying on them, for example before discarding paper

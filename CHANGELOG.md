@@ -1,8 +1,21 @@
 # Changelog
 
 All notable changes to this project are listed here. Versions follow
-[semantic versioning](https://semver.org/); while the major version is 0,
-minor versions may change behaviour or settings.
+[semantic versioning](https://semver.org/). From 1.0.0 on, a change that
+needs action when upgrading (a renamed or removed setting, a different folder
+layout, a changed webhook payload) only comes with a new major version.
+
+## [1.0.0] - 2026-10-03
+
+First stable release. No functional changes since 0.12.0. Settings, folder
+layout, file naming, `plan.json` and the webhook payload are now stable, see
+the versioning note above.
+
+### Added
+- Issue templates for bug reports and feature requests. They ask for log
+  lines and settings, never for documents.
+- The Unraid template carries its `TemplateURL`, so Unraid can pick up
+  template changes.
 
 ## [0.12.0] - 2026-10-03
 
@@ -208,6 +221,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.0.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.12.0...v1.0.0
 [0.12.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Tom-Joad/scan-stack-splitter/compare/v0.10.0...v0.11.0

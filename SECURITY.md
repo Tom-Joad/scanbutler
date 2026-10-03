@@ -2,7 +2,8 @@
 
 ## Supported versions
 
-Only the latest release receives fixes.
+Only the latest release receives fixes. Security fixes go into a new
+release of the current major version.
 
 ## Reporting a vulnerability
 

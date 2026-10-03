@@ -1,0 +1,51 @@
+name: Bug report
+description: Something doesn't work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never attach real documents, OCR text or unredacted file names.**
+        This tool processes personal papers; an issue is public. Log lines
+        and settings are almost always enough.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The `version` field of the `starting` line in the container log.
+      placeholder: "1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: input
+    attributes:
+      label: Input
+      options: [stacks, scanner, paperless, not input-specific]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: |
+        The `starting` line and the lines around the problem. Check them for
+        names or titles from your documents and redact those first.
+      render: json
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: |
+        How you run it (Unraid, Synology, docker compose), memory limit, and
+        the settings you changed. Leave out the API key, tokens and webhook URLs.
+  - type: textarea
+    id: file
+    attributes:
+      label: About the file (optional)
+      description: Pages, scanner model, born-digital or scanned, anything special. Do not upload it.

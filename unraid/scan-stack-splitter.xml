@@ -8,6 +8,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/Tom-Joad/scan-stack-splitter</Support>
   <Project>https://github.com/Tom-Joad/scan-stack-splitter</Project>
+  <TemplateURL>https://raw.githubusercontent.com/Tom-Joad/scan-stack-splitter/main/unraid/scan-stack-splitter.xml</TemplateURL>
   <Overview>
     Turns scanned paper into searchable PDFs, one per document, named by topic and date. The
     Stacks input splits large scans (hundreds of pages, no separator sheets) into documents by
