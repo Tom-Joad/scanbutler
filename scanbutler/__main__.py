@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import logging
 import os
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from . import __version__, logging_setup, pdfops
+from . import __version__, languages, logging_setup, pdfops
 from .config import ConfigError, Settings, available_cpus, memory_limit_bytes
 from .mistral import MistralClient
 from .paperless import PaperlessClient
@@ -47,6 +48,27 @@ def prepare_tmpdir(work_dir: Path) -> None:
         wanted = str(fallback)
     os.environ["TMPDIR"] = wanted
     tempfile.tempdir = None  # re-read TMPDIR on next use
+
+
+def prepare_languages(settings: Settings) -> Settings:
+    """Download languages that aren't built in; point Tesseract at them.
+
+    Returns the settings with the languages that are actually available.
+    """
+    wanted = settings.ocrmypdf_languages.split("+")
+    ready = languages.prepare(wanted, settings.work_dir / "tessdata", languages.system_dir(), settings.tessdata_url)
+    if ready.tessdata:
+        os.environ["TESSDATA_PREFIX"] = str(ready.tessdata)
+    log.info(
+        "languages ready",
+        extra={
+            "languages": "+".join(ready.languages),
+            "downloaded": ready.downloaded,
+            "cached": ready.cached,
+            "missing": ready.missing,
+        },
+    )
+    return dataclasses.replace(settings, ocrmypdf_languages="+".join(ready.languages))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -90,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     prepare_tmpdir(settings.work_dir)
+    if settings.ocrmypdf_enabled and command != "rebuild":
+        settings = prepare_languages(settings)
 
     if command == "rebuild":
         work = Path(args.work_dir)

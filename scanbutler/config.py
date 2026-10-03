@@ -10,6 +10,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .languages import DEFAULT_URL as TESSDATA_DEFAULT_URL
+from .languages import LanguageError, parse
 from .pdfops import OcrLimits
 
 
@@ -208,6 +210,7 @@ class Settings:
 
     ocrmypdf_enabled: bool
     ocrmypdf_languages: str
+    tessdata_url: str
     ocrmypdf_jobs: int
     ocrmypdf_extra_args: str
     ocr_limits: OcrLimits
@@ -242,6 +245,11 @@ class Settings:
         ocr_mode = _str("OCR_MODE", "batch").lower()
         if ocr_mode not in {"batch", "direct"}:
             raise ConfigError(f"OCR_MODE must be batch or direct, got {ocr_mode!r}")
+
+        try:
+            languages = "+".join(parse(_str("OCRMYPDF_LANGUAGES", "deu+eng")))
+        except LanguageError as exc:
+            raise ConfigError(str(exc)) from exc
 
         data = Path(_str("DATA_DIR", "/data"))
         # Splitting profits from Mistral OCR's structure; naming a single
@@ -319,7 +327,8 @@ class Settings:
             filename_pattern=pattern,
             no_date_label=_str("NO_DATE_LABEL", "undated"),
             ocrmypdf_enabled=_bool("OCRMYPDF_ENABLED", True),
-            ocrmypdf_languages=_str("OCRMYPDF_LANGUAGES", "deu+eng"),
+            ocrmypdf_languages=languages,
+            tessdata_url=_str("TESSDATA_URL", TESSDATA_DEFAULT_URL),
             ocrmypdf_jobs=(
                 auto_jobs(memory_limit_bytes(), available_cpus())
                 if _str("OCRMYPDF_JOBS", "auto").lower() == "auto"

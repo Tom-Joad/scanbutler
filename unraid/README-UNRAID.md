@@ -24,6 +24,7 @@ interface; everything it does shows up in the container log.
    | `MISTRAL_MAX_RPS` | a little below your account's requests-per-second limit for that model |
    | `TITLE_LANGUAGE` | e.g. `English`; leave empty to use each document's language |
    | `NO_DATE_LABEL` | the word used when a document has no date, e.g. `undated` |
+   | `OCRMYPDF_LANGUAGES` | `deu+eng`; add e.g. `+fra` for French, downloaded once at startup |
    | `OCRMYPDF_JOBS` | `auto`: follows the memory limit (`--memory=4g` in *Extra Parameters*) |
    | `PAPERLESS_URL`, `PAPERLESS_TOKEN` | optional, enable the Paperless input; see below |
    | `QUEUE_WEBHOOK_URL` | optional, e.g. a Home Assistant webhook; see the [main README](../README.md#queue-webhook-home-assistant) |
