@@ -301,7 +301,12 @@ def process_stack(src: Path, folder: PurePosixPath, settings: Settings, backend,
     if not searchable.exists():
         if settings.ocrmypdf_enabled:
             pdfops.make_searchable(
-                src, searchable, settings.ocrmypdf_languages, settings.ocrmypdf_jobs, settings.ocrmypdf_extra_args
+                src,
+                searchable,
+                settings.ocrmypdf_languages,
+                settings.ocrmypdf_jobs,
+                settings.ocrmypdf_extra_args,
+                settings.ocr_limits,
             )
         else:
             shutil.copyfile(src, searchable)
@@ -403,7 +408,12 @@ def process_for_paperless(
     if not searchable.exists():
         if settings.ocrmypdf_enabled:
             pdfops.make_searchable(
-                src, searchable, settings.ocrmypdf_languages, settings.ocrmypdf_jobs, settings.ocrmypdf_extra_args
+                src,
+                searchable,
+                settings.ocrmypdf_languages,
+                settings.ocrmypdf_jobs,
+                settings.ocrmypdf_extra_args,
+                settings.ocr_limits,
             )
         else:
             shutil.copyfile(src, searchable)

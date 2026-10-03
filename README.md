@@ -149,6 +149,10 @@ docker compose run --rm scan-stack-splitter process /data/some.pdf --profile sta
      on a page, and cleaning a page with a high-resolution logo at that size
      can exhaust the memory.
 
+   Every mode runs within limits, so one odd page can't exhaust the server.
+   Tesseract sees at most `OCRMYPDF_MAX_OCR_MPIXELS` per page, and each page
+   and each run has a time limit. The visible page is never downsampled.
+
    If a mode fails, a simpler one is tried before the file counts as failed.
    The last resort OCRs only pages without text and does no image processing.
    The log and `.error.txt` show ocrmypdf's actual error message. The image
@@ -260,6 +264,10 @@ them with comments.
 | `OCRMYPDF_LANGUAGES` | `deu+eng` | Tesseract languages; only `deu` and `eng` ship as best models |
 | `OCRMYPDF_JOBS` | number of CPUs | Parallel Tesseract jobs |
 | `OCRMYPDF_EXTRA_ARGS` | — | Appended to the ocrmypdf call |
+| `OCRMYPDF_MAX_OCR_MPIXELS` | `50` | Larger page images are downsampled for OCR only. Peak memory is about jobs × 16 bytes × this value; A4 at 600 dpi is about 35 |
+| `OCRMYPDF_PAGE_TIMEOUT` | `300` | Seconds Tesseract may spend on one page; the page is kept either way |
+| `OCRMYPDF_FILE_TIMEOUT_MINUTES` | `120` | An ocrmypdf run taking longer is stopped, and the next mode is tried |
+| `OCRMYPDF_SKIP_BIG_MPIXELS` | `200` | Last-resort mode only: pages above this are kept without new OCR |
 
 **Throughput, webhook and logging**
 

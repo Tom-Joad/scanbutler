@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shlex
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 import pikepdf
@@ -83,6 +84,33 @@ REDO_MODE = ("redo", ["--redo-ocr", "--rotate-pages", "--oversample", "300"])
 PLAIN_MODE = ("plain", ["--skip-text"])
 
 
+@dataclass(frozen=True)
+class OcrLimits:
+    """Upper bounds so one odd page can't exhaust the server.
+
+    ocrmypdf rasterizes a page at the resolution of its sharpest image. A
+    colour logo stored at ~1550 dpi turns an A4 page into a 230-megapixel
+    bitmap, which killed unpaper in a 2 GB container. --redo-ocr together with
+    max_ocr_mpixels handled the same page and still found its text.
+    """
+
+    # Tesseract sees at most this many megapixels per page; larger images are
+    # downsampled for OCR only. Peak memory is about jobs x 16 B x this value.
+    max_ocr_mpixels: int = 50
+    # Seconds Tesseract may spend on one page before giving up on it.
+    page_timeout: int = 300
+    # Minutes one ocrmypdf run may take before the next mode is tried.
+    file_timeout_minutes: int = 120
+    # In the last-resort mode, pages above this are kept without new OCR.
+    skip_big_mpixels: int = 200
+
+    def args(self, mode: str) -> list[str]:
+        extra = ["--max-ocr-image-mpixels", str(self.max_ocr_mpixels), "--tesseract-timeout", str(self.page_timeout)]
+        if mode == "plain":
+            extra += ["--skip-big", str(self.skip_big_mpixels)]
+        return extra
+
+
 def ocr_modes(has_text: bool, tagged: bool = False) -> list[tuple[str, list[str]]]:
     if tagged:
         # Office documents, bank statements and the like: the text is the
@@ -111,7 +139,9 @@ def _ocrmypdf_error(returncode: int, stderr: str) -> str:
     return f"exit code {returncode}: {detail[-1200:]}"
 
 
-def make_searchable(src: Path, dst: Path, languages: str, jobs: int, extra_args: str) -> None:
+def make_searchable(
+    src: Path, dst: Path, languages: str, jobs: int, extra_args: str, limits: OcrLimits = OcrLimits()
+) -> None:
     """Add an invisible Tesseract text layer so every output PDF is searchable.
 
     Mistral OCR returns text without word positions, so it cannot place a text
@@ -131,6 +161,7 @@ def make_searchable(src: Path, dst: Path, languages: str, jobs: int, extra_args:
         cmd = [
             "ocrmypdf",
             *options,
+            *limits.args(name),
             "--output-type", "pdf",
             "--language", languages,
             "--jobs", str(jobs),
@@ -139,7 +170,12 @@ def make_searchable(src: Path, dst: Path, languages: str, jobs: int, extra_args:
             str(src),
             str(tmp),
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=limits.file_timeout_minutes * 60)
+        except subprocess.TimeoutExpired:
+            result = subprocess.CompletedProcess(
+                cmd, -1, "", f"error: not finished after {limits.file_timeout_minutes} minutes, stopped"
+            )
         if result.returncode == 0:
             tmp.replace(dst)
             log.info("text layer done", extra={"file": src.name, "mode": name, "fallback": bool(errors)})

@@ -10,6 +10,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .pdfops import OcrLimits
+
 
 class ConfigError(RuntimeError):
     """Raised when a required setting is missing or malformed."""
@@ -133,6 +135,7 @@ class Settings:
     ocrmypdf_languages: str
     ocrmypdf_jobs: int
     ocrmypdf_extra_args: str
+    ocr_limits: OcrLimits
 
     pause_retry_minutes: float
     paperless_url: str
@@ -243,6 +246,12 @@ class Settings:
             ocrmypdf_languages=_str("OCRMYPDF_LANGUAGES", "deu+eng"),
             ocrmypdf_jobs=_int("OCRMYPDF_JOBS", os.cpu_count() or 1, minimum=1),
             ocrmypdf_extra_args=os.environ.get("OCRMYPDF_EXTRA_ARGS", "").strip(),
+            ocr_limits=OcrLimits(
+                max_ocr_mpixels=_int("OCRMYPDF_MAX_OCR_MPIXELS", 50, minimum=1),
+                page_timeout=_int("OCRMYPDF_PAGE_TIMEOUT", 300, minimum=10),
+                file_timeout_minutes=_int("OCRMYPDF_FILE_TIMEOUT_MINUTES", 120, minimum=1),
+                skip_big_mpixels=_int("OCRMYPDF_SKIP_BIG_MPIXELS", 200, minimum=1),
+            ),
             pause_retry_minutes=_float("PAUSE_RETRY_MINUTES", 30.0),
             paperless_url=paperless_url,
             paperless_token=paperless_token,

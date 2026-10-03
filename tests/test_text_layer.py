@@ -40,9 +40,11 @@ def fake_ocrmypdf(monkeypatch, outcomes):
     """Replace ocrmypdf: each call pops (returncode, stderr) and records its options."""
     calls = []
 
-    def run(cmd, capture_output, text):
+    def run(cmd, capture_output, text, timeout=None):
         calls.append(cmd)
         returncode, stderr = outcomes.pop(0)
+        if returncode == "timeout":
+            raise subprocess.TimeoutExpired(cmd, timeout)
         if returncode == 0:
             with open(cmd[-1], "wb") as handle:
                 handle.write(b"%PDF-1.4 fake")
@@ -87,3 +89,40 @@ def test_all_modes_failing_raises_with_details(tmp_path, monkeypatch):
     assert "scan: exit code 7" in message and "No space left on device" in message
     assert "plain: exit code 6" in message
     assert not (tmp_path / "out.pdf").exists()
+
+
+def test_limits_are_passed_to_every_mode(tmp_path, monkeypatch):
+    src = tmp_path / "scan.pdf"
+    make_pdf(src, 1)
+    calls = fake_ocrmypdf(monkeypatch, [(7, "unpaper died with SIGKILL"), (7, "x"), (0, "")])
+    limits = pdfops.OcrLimits(max_ocr_mpixels=40, page_timeout=120, file_timeout_minutes=5, skip_big_mpixels=150)
+
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "", limits)
+
+    for cmd in calls:
+        assert cmd[cmd.index("--max-ocr-image-mpixels") + 1] == "40"
+        assert cmd[cmd.index("--tesseract-timeout") + 1] == "120"
+    # --skip-big drops OCR for a page, so it only guards the last resort.
+    assert ["--skip-big" in cmd for cmd in calls] == [False, False, True]
+    assert calls[2][calls[2].index("--skip-big") + 1] == "150"
+
+
+def test_a_run_that_takes_too_long_falls_back(tmp_path, monkeypatch):
+    src = tmp_path / "scan.pdf"
+    make_pdf(src, 1)
+    calls = fake_ocrmypdf(monkeypatch, [("timeout", ""), (0, "")])
+
+    pdfops.make_searchable(src, tmp_path / "out.pdf", "deu", 2, "", pdfops.OcrLimits(file_timeout_minutes=1))
+
+    assert len(calls) == 2 and (tmp_path / "out.pdf").exists()
+
+
+def test_limit_settings(monkeypatch):
+    from stacksplit.config import Settings
+
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    assert Settings.from_env().ocr_limits == pdfops.OcrLimits()
+    monkeypatch.setenv("OCRMYPDF_MAX_OCR_MPIXELS", "30")
+    monkeypatch.setenv("OCRMYPDF_FILE_TIMEOUT_MINUTES", "45")
+    limits = Settings.from_env().ocr_limits
+    assert (limits.max_ocr_mpixels, limits.file_timeout_minutes) == (30, 45)
