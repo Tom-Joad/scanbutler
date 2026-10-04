@@ -71,6 +71,20 @@ def prepare_languages(settings: Settings) -> Settings:
     return dataclasses.replace(settings, ocrmypdf_languages="+".join(ready.languages))
 
 
+def _process_one(args: argparse.Namespace, settings: Settings, client: MistralClient) -> None:
+    profile = settings.profile(args.profile)
+    if profile.upload:
+        paperless = client_for(profile.paperless)
+        try:
+            document = process_for_paperless(args.pdf, PurePosixPath(args.folder), settings, paperless, profile, client)
+        finally:
+            paperless.close()
+        print(f"Paperless document {document}")
+    else:
+        profile.output.mkdir(parents=True, exist_ok=True)
+        process_stack(args.pdf, PurePosixPath(args.folder), settings, client, profile)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="scanbutler", description="Turn scanned paper into named, searchable PDFs.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -129,19 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     client = _client(settings)
     try:
         if command == "process":
-            profile = settings.profile(args.profile)
-            if profile.upload:
-                paperless = client_for(profile.paperless)
-                try:
-                    document = process_for_paperless(
-                        args.pdf, PurePosixPath(args.folder), settings, paperless, profile, client
-                    )
-                finally:
-                    paperless.close()
-                print(f"Paperless document {document}")
-            else:
-                profile.output.mkdir(parents=True, exist_ok=True)
-                process_stack(args.pdf, PurePosixPath(args.folder), settings, client, profile)
+            with logging_setup.working_on((PurePosixPath(args.folder) / args.pdf.name).as_posix()):
+                _process_one(args, settings, client)
         else:
             run_all(settings, client)
     finally:

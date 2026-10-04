@@ -2,6 +2,11 @@
 
 Document contents and the API key are never passed to the logger: only file
 names, page numbers, counts and timings are logged.
+
+Every line logged while a file is being worked on carries that file as
+`source`, also lines from helper threads and the Mistral client, which don't
+know the file themselves: with several files in progress, a batch job id
+alone doesn't say which file it belongs to.
 """
 
 from __future__ import annotations
@@ -9,9 +14,25 @@ from __future__ import annotations
 import json
 import logging
 import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 
 _RESERVED = frozenset(logging.LogRecord("", 0, "", 0, "", None, None).__dict__)
+
+# The file the current thread works on, as "folder/name" below the inbox.
+# Thread pools carry it over through priority.keep.
+_SOURCE: ContextVar[str | None] = ContextVar("source", default=None)
+
+
+@contextmanager
+def working_on(source: str):
+    """Tag every log line in this block, and in pools it starts, with `source`."""
+    token = _SOURCE.set(source)
+    try:
+        yield
+    finally:
+        _SOURCE.reset(token)
 
 
 class JsonFormatter(logging.Formatter):
@@ -33,6 +54,10 @@ class JsonFormatter(logging.Formatter):
                 if key == "pageno" and value is None:
                     continue
                 payload[key] = value
+
+        source = _SOURCE.get()
+        if source is not None and "source" not in payload:
+            payload["source"] = source
 
         if record.exc_info:
             payload["error"] = self.formatException(record.exc_info).splitlines()[-1]

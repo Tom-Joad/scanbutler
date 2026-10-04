@@ -19,7 +19,7 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
-from . import priority, retention
+from . import logging_setup, priority, retention
 from .config import Profile, Settings
 from .pdfops import looks_complete
 from .naming import unique_path
@@ -117,6 +117,10 @@ class InboxWatcher:
         before = self._signature(path)
         if self.reporter:
             self.reporter.set_processing(self.profile.name, True)
+        with logging_setup.working_on((folder / path.name).as_posix()):
+            self._process(path, folder, before)
+
+    def _process(self, path: Path, folder: PurePosixPath, before: tuple[int, int] | None) -> None:
         try:
             with priority.marked(self.profile.priority):
                 if self.profile.upload:

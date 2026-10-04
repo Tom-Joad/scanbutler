@@ -8,6 +8,11 @@ layout, a changed webhook payload) only comes with a new major version.
 ## [Unreleased]
 
 ### Changed
+- Every log line written while a file is being worked on names it in
+  `source`, including lines that had no file so far: `batch submitted`,
+  `batch waiting`, `api retry`, `ocr chunk done`, `naming documents` and
+  others. With several files in progress, each line now says which file it
+  belongs to.
 - The container log starts with a TomJoad Images banner instead of the
   base image's "custom build" one.
 
