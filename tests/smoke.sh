@@ -96,6 +96,8 @@ for _ in $(seq 1 60); do
     sleep 2
 done
 in_log '"event":"starting".*"version"' || fail "no starting line with the version"
+in_log 'BASED ON IMAGES FROM LINUXSERVER\.IO' || fail "the startup banner is not ours"
+if in_log 'Based on images from linuxserver\.io'; then fail "the base image's banner is still shown"; fi
 in_log '"event":"watching inbox"' || fail "the watcher did not start"
 in_log '"event":"languages ready","languages":"deu\+eng\+fra","downloaded":\["fra"\]' \
     || fail "fra was not downloaded"

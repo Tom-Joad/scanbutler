@@ -5,6 +5,12 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Changed
+- The container log starts with a TomJoad Images banner instead of the
+  base image's "custom build" one.
+
 ## [1.3.1] - 2026-10-04
 
 ### Fixed
