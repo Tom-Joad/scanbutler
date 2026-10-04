@@ -313,6 +313,10 @@ First public release.
 [1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v1.0.0
+[1.3.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.12.0...v1.0.0
 [0.12.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.10.0...v0.11.0
