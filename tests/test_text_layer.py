@@ -7,6 +7,7 @@ import pytest
 
 from scanbutler import pdfops
 
+from .ccitt_pdf import make_ccitt_pdf
 from .conftest import make_pdf
 from .test_text_source import make_text_pdf
 
@@ -50,7 +51,7 @@ def fake_ocrmypdf(monkeypatch, outcomes):
         returncode, stderr = outcomes.pop(0)
         if returncode == "timeout":
             raise subprocess.TimeoutExpired(cmd, timeout)
-        if returncode == 0:
+        if returncode in (0, pdfops.INVALID_OUTPUT):  # 4: written, then the output check failed
             with open(cmd[-1], "wb") as handle:
                 handle.write(b"%PDF-1.4 fake")
         return subprocess.CompletedProcess(cmd, returncode, "", stderr)
@@ -181,3 +182,45 @@ def test_downsampling_has_a_time_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(pdfops.subprocess, "run", hang)
     with pytest.raises(RuntimeError, match="did not finish"):
         pdfops.downsample_images(tmp_path / "in.pdf", tmp_path / "out.pdf", 600, timeout=60)
+
+
+UNDECODABLE = (
+    "Postprocessing...\n"
+    "ERROR: stream 12 0 R (/CCITTFaxDecode) could not be decoded: /CCITTFaxDecode without /DecodeParms\n"
+    "Output file: The generated PDF is INVALID\n"
+)
+
+
+def test_output_with_the_inputs_own_undecodable_images_is_kept(tmp_path, monkeypatch, caplog):
+    src = tmp_path / "fax.pdf"
+    make_ccitt_pdf(src)
+    calls = fake_ocrmypdf(monkeypatch, [(pdfops.INVALID_OUTPUT, UNDECODABLE)])
+
+    with caplog.at_level("WARNING"):
+        pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", "")
+
+    assert len(calls) == 1 and (tmp_path / "out.pdf").exists()
+    done = next(r for r in caplog.records if r.message == "text layer done")
+    assert done.levelname == "WARNING"
+    assert done.input_streams_unreadable == ["/CCITTFaxDecode without /DecodeParms"]
+
+
+def test_undecodable_output_from_a_clean_input_still_fails(tmp_path, monkeypatch):
+    src = tmp_path / "scan.pdf"
+    make_pdf(src, 1)
+    calls = fake_ocrmypdf(monkeypatch, [(pdfops.INVALID_OUTPUT, UNDECODABLE)] * 3)
+
+    with pytest.raises(RuntimeError, match="exit code 4"):
+        pdfops.make_searchable(src, tmp_path / "out.pdf", "deu+eng", "")
+
+    assert len(calls) == 3 and not (tmp_path / "out.pdf").exists()
+
+
+def test_other_errors_next_to_inherited_ones_are_not_accepted(tmp_path):
+    src = tmp_path / "fax.pdf"
+    make_ccitt_pdf(src)
+    assert pdfops.inherited_problems(UNDECODABLE, src) == ["/CCITTFaxDecode without /DecodeParms"]
+    assert pdfops.inherited_problems(UNDECODABLE + "ERROR: page 1: content stream is broken\n", src) is None
+    other = UNDECODABLE.replace("without /DecodeParms", "with unsupported /K")
+    assert pdfops.inherited_problems(other, src) is None  # a problem the input doesn't have
+    assert pdfops.inherited_problems("Output file: The generated PDF is INVALID\n", src) is None

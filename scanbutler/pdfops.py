@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shlex
 import subprocess
 import threading
@@ -324,6 +325,41 @@ def _searchable_in_chunks(
         part.unlink(missing_ok=True)
 
 
+# ocrmypdf's exit code when it wrote the output, but its own check of the
+# output found streams it can't decode.
+INVALID_OUTPUT = 4
+_UNDECODABLE = re.compile(r"could not be decoded: (.+)")
+
+
+def _stream_problems(path: Path) -> set[str]:
+    """Why streams of `path` can't be decoded, by ocrmypdf's own check."""
+    from ocrmypdf._stream_check import check_streams  # the check behind exit code 4
+
+    with pikepdf.open(path) as pdf:
+        return {m.group(1).strip() for line in check_streams(pdf) if (m := _UNDECODABLE.search(line))}
+
+
+def inherited_problems(stderr: str, src: Path) -> list[str] | None:
+    """The output check's complaints, if the input already had every one of them.
+
+    A scan may hold images that are valid PDF but that pikepdf refuses, e.g.
+    CCITT fax images without /DecodeParms (the spec has defaults for them).
+    ocrmypdf then writes a complete output and still exits with 4. Such an
+    output is no worse than the input. None if anything else went wrong, or
+    if the output has a problem the input doesn't.
+    """
+    lines = [line.strip() for line in stderr.splitlines() if line.strip()]
+    reasons = {m.group(1).strip() for line in lines if (m := _UNDECODABLE.search(line))}
+    others = [line for line in lines if "error" in line.lower() and not _UNDECODABLE.search(line)]
+    if not reasons or others:
+        return None
+    try:
+        known = _stream_problems(src)
+    except Exception:  # noqa: BLE001 - can't compare, so don't accept
+        return None
+    return sorted(reasons) if reasons <= known else None
+
+
 def _searchable(
     src: Path,
     name_for_log: str,
@@ -396,6 +432,15 @@ def _run_modes(
             tmp.replace(dst)
             log.info("text layer done", extra={"file": name_for_log, "mode": name, "fallback": bool(errors)})
             return
+        if result.returncode == INVALID_OUTPUT and tmp.exists():
+            inherited = inherited_problems(result.stderr, src)
+            if inherited is not None:
+                tmp.replace(dst)
+                log.warning(
+                    "text layer done",
+                    extra={"file": name_for_log, "mode": name, "fallback": bool(errors), "input_streams_unreadable": inherited},
+                )
+                return
         tmp.unlink(missing_ok=True)
         error = _ocrmypdf_error(result.returncode, result.stderr)
         errors.append(f"{name}: {error}")

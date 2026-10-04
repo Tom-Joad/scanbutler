@@ -4,7 +4,8 @@
 # both Paperless inputs and tag sharing against an unreachable Paperless,
 # keeps the health check's heartbeat going,
 # the OCR tools and language models are installed, and a language beyond
-# the built-in ones is downloaded (or left out when it can't be). No
+# the built-in ones is downloaded (or left out when it can't be), and a scan
+# with fax images pikepdf can't decode still gets its text layer. No
 # document is processed and Mistral is never called.
 # Usage: tests/smoke.sh <image>
 # SMOKE_TESSDATA_URL replaces the tessdata_best download URL, e.g. a local
@@ -48,6 +49,21 @@ for lang in deu eng osd; do
 done
 docker run --rm --entrypoint sh "$IMAGE" -c 'command -v gs && command -v unpaper' >/dev/null \
     || fail "ghostscript or unpaper missing"
+
+echo "== a scan with fax images pikepdf can't decode still gets its text layer"
+TESTS=$(cd "$(dirname "$0")" && pwd)
+text=$(docker run --rm --entrypoint sh -v "$TESTS:/tests:ro" "$IMAGE" -c '
+    cd /tmp && python3 /tests/ccitt_pdf.py fax.pdf && python3 -c "
+from pathlib import Path
+import pypdfium2
+from scanbutler import logging_setup, pdfops
+logging_setup.configure()
+pdfops.configure_jobs(2)
+pdfops.make_searchable(Path(\"fax.pdf\"), Path(\"out.pdf\"), \"deu+eng\", \"\")
+print(pypdfium2.PdfDocument(\"out.pdf\")[0].get_textpage().get_text_range())
+"' 2>&1) || fail "no text layer for the fax scan: $text"
+grep -q "Leukocytes" <<<"$text" || fail "the fax scan's text layer lacks its text: $text"
+grep -q '"input_streams_unreadable"' <<<"$text" || fail "no warning about the unreadable fax images"
 
 echo "== without MISTRAL_API_KEY the watcher reports a configuration error"
 docker run -d --name "$NAME" "$IMAGE" >/dev/null
