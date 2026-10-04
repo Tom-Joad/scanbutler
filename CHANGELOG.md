@@ -5,6 +5,17 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- Scans with fax images (CCITT) that have no decode parameters no longer
+  fail with `/CCITTFaxDecode without /DecodeParms`. Such images are valid
+  PDF, but ocrmypdf's check of its own output refuses them and exits with
+  code 4 although the searchable file is complete. When the input already
+  has exactly these problems, the output is kept, and `text layer done` is
+  logged as a warning with `input_streams_unreadable`. Any other problem
+  still fails as before.
+
 ## [1.4.0] - 2026-10-04
 
 ### Changed
