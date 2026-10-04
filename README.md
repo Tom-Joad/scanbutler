@@ -328,6 +328,9 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `PAPERLESS_TAGS` | — | Comma-separated tag ids to add on upload, e.g. `3,7` |
 | `PAPERLESS_TEXT_SOURCE` | `tesseract` | `mistral` replaces the document's content in Paperless with Mistral OCR's text, tables included; see [below](#paperless-ngx-input) |
 | `PAPERLESS_MAX_WAIT_MINUTES` | `30` | How long to wait for Paperless to consume a file before trying again later |
+| `PAPERLESS_SHARE_TAGS` | `false` | `true` removes the owner from every tag, so all users see it; needs a superuser token; see [Shared tags](#shared-tags) |
+| `PAPERLESS_SHARE_TAGS_MINUTES` | `1` | How often the tags are checked |
+| `PAPERLESS_SHARE_TAGS_READONLY` | — | Comma-separated tag names that keep their owner and are only visible to other users, e.g. `ai-processed` |
 
 **Naming**
 
@@ -594,6 +597,33 @@ workflows, to sort documents.
 
 Tested with Paperless-ngx 3.2. The task format of version 2 is supported as
 well.
+
+### Shared tags
+
+Paperless gives every new tag an owner, the user who created it, and other
+users only see tags that have no owner or are shared with them. On an
+instance with several users, a tag that one of them, or an AI tagger,
+creates is therefore invisible to everyone else. Paperless has no setting
+that makes new tags ownerless.
+
+Set `PAPERLESS_SHARE_TAGS=true`, and the container takes care of it. Every
+`PAPERLESS_SHARE_TAGS_MINUTES` (default 1), it removes the owner and any
+explicit permissions from every tag that has an owner. Every user with the
+global tag permissions may then see and change the tag.
+
+- The token needs permission to change other users' tags, in practice a
+  superuser's. With a weaker one, a warning is logged once, and uploads
+  carry on.
+- `PAPERLESS_SHARE_TAGS_READONLY` takes comma-separated tag names, for
+  example `ai-processed`, a marker an AI tagger uses to find work. Those tags
+  keep their owner, every other user may see them, and nobody else may
+  change them. A read-only tag without an owner is left alone with a
+  warning: give it one in Paperless.
+- A check with nothing to do costs one request for the tag list. The log
+  says how many tags were shared, with their ids (`tags shared`), never
+  their names.
+- This works on tags only. Correspondents and document types keep their
+  owners.
 
 ## Rate limits and cost
 

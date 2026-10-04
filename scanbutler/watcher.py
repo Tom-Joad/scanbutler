@@ -27,6 +27,7 @@ from .notify import QueueReporter
 from .pause import PauseGate, limit_error_in
 from .paperless import PaperlessClient, PaperlessUnavailable
 from .pipeline import AlreadyInProgress, process_for_paperless, process_stack
+from .sharing import TagSharer
 
 log = logging.getLogger(__name__)
 
@@ -261,6 +262,13 @@ def run_all(settings: Settings, backend) -> None:
         log.info("queue webhook enabled", extra={"heartbeat_s": settings.queue_webhook_heartbeat_seconds})
 
     paperless = PaperlessClient(settings.paperless_url, settings.paperless_token) if settings.paperless_url else None
+    if settings.paperless_share_tags:
+        sharer = TagSharer(
+            PaperlessClient(settings.paperless_url, settings.paperless_token),
+            settings.paperless_share_tags_readonly,
+            settings.paperless_share_tags_minutes * 60,
+        )
+        threading.Thread(target=sharer.run, args=(stop,), name="share-tags", daemon=True).start()
     workers = [
         threading.Thread(
             target=InboxWatcher(settings, profile, backend, stop, reporter, gate, paperless).run,

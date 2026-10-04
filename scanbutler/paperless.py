@@ -103,6 +103,44 @@ class PaperlessClient:
         items = result.get("results", []) if isinstance(result, dict) else result
         return items[0] if items else None
 
+    def _all(self, path: str, params: dict | None = None) -> list[dict]:
+        """Every item of a paginated list endpoint."""
+        items: list[dict] = []
+        page = 1
+        while True:
+            result = self._request("GET", path, params={**(params or {}), "page": page, "page_size": 100}).json()
+            items += result.get("results", [])
+            if not result.get("next"):
+                return items
+            page += 1
+
+    def tags(self) -> list[dict]:
+        """Every tag the token may see, with its owner and permissions."""
+        return self._all("/api/tags/", {"full_perms": "true"})
+
+    def user_ids(self) -> list[int]:
+        return [user["id"] for user in self._all("/api/users/")]
+
+    def set_tag_permissions(
+        self, ids: list[int], owner: int | None, view_users: list[int] = (), change_users: list[int] = ()
+    ) -> None:
+        """Replace owner and permissions of the given tags in one call."""
+        self._request(
+            "POST",
+            "/api/bulk_edit_objects/",
+            json={
+                "objects": list(ids),
+                "object_type": "tags",
+                "operation": "set_permissions",
+                "owner": owner,
+                "merge": False,
+                "permissions": {
+                    "view": {"users": list(view_users), "groups": []},
+                    "change": {"users": list(change_users), "groups": []},
+                },
+            },
+        )
+
     def wait(self, task_id: str, poll_seconds: float, max_wait_seconds: float) -> dict | None:
         """The finished task, or None if it is still running after max_wait_seconds."""
         deadline = time.monotonic() + max_wait_seconds

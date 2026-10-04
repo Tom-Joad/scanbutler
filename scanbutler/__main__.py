@@ -108,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             "ocr_jobs_total": settings.ocrmypdf_jobs,
             "ocr_priority": [p.name for p in settings.profiles if p.priority],
             "work_retention_days": settings.work_retention_days,
+            "paperless_share_tags": settings.paperless_share_tags,
         },
     )
 
