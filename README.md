@@ -689,6 +689,9 @@ health or financial records.
   after the file was processed; until then, `rebuild` can re-cut it. Folders
   of failed files stay until you delete them.
 - Logs contain file names, page numbers and counts, never document text.
+  The file names are there on purpose: the log has to show which file is
+  being worked on. Keep this in mind before sharing a log, and redact the
+  names.
 - The Paperless input keeps no copy once a document is confirmed in
   Paperless. Only the register of uploaded originals remains: checksum, file
   name, document id and date.
