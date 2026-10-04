@@ -220,6 +220,9 @@ class Settings:
     paperless_token: str
     paperless_tags: tuple[int, ...]
     paperless_max_wait_minutes: float
+    paperless_share_tags: bool
+    paperless_share_tags_readonly: tuple[str, ...]
+    paperless_share_tags_minutes: float
     queue_webhook_url: str
     queue_webhook_check_seconds: int
     queue_webhook_heartbeat_seconds: int
@@ -289,6 +292,12 @@ class Settings:
             paperless_tags = [int(t) for t in os.environ.get("PAPERLESS_TAGS", "").replace(" ", "").split(",") if t]
         except ValueError as exc:
             raise ConfigError("PAPERLESS_TAGS must be comma-separated tag ids, e.g. 3,7") from exc
+        share_tags = _bool("PAPERLESS_SHARE_TAGS", False)
+        if share_tags and not paperless_url:
+            raise ConfigError("PAPERLESS_SHARE_TAGS needs PAPERLESS_URL and PAPERLESS_TOKEN")
+        share_minutes = _float("PAPERLESS_SHARE_TAGS_MINUTES", 1.0)
+        if share_minutes <= 0:
+            raise ConfigError(f"PAPERLESS_SHARE_TAGS_MINUTES must be > 0, got {share_minutes}")
         for profile in profiles:
             if profile.text_source not in {"mistral", "tesseract"}:
                 raise ConfigError(
@@ -347,6 +356,11 @@ class Settings:
             paperless_token=paperless_token,
             paperless_tags=tuple(paperless_tags),
             paperless_max_wait_minutes=_float("PAPERLESS_MAX_WAIT_MINUTES", 30.0),
+            paperless_share_tags=share_tags,
+            paperless_share_tags_readonly=tuple(
+                name.strip() for name in os.environ.get("PAPERLESS_SHARE_TAGS_READONLY", "").split(",") if name.strip()
+            ),
+            paperless_share_tags_minutes=share_minutes,
             queue_webhook_url=os.environ.get("QUEUE_WEBHOOK_URL", "").strip(),
             queue_webhook_check_seconds=_int("QUEUE_WEBHOOK_CHECK_SECONDS", 10, minimum=1),
             queue_webhook_heartbeat_seconds=_int("QUEUE_WEBHOOK_HEARTBEAT_SECONDS", 300, minimum=10),

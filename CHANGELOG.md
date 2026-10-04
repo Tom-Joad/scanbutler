@@ -5,6 +5,17 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.3.0] - 2026-10-04
+
+### Added
+- **Shared Paperless tags.** With `PAPERLESS_SHARE_TAGS=true`, every tag
+  that has an owner loses it, checked every `PAPERLESS_SHARE_TAGS_MINUTES`
+  (default 1). On an instance with several users, everyone then sees the
+  tags that others or an AI tagger created. Tags named in
+  `PAPERLESS_SHARE_TAGS_READONLY` keep their owner and become visible, but
+  not changeable, for everyone else. Needs a token that may change other
+  users' tags.
+
 ## [1.2.0] - 2026-10-03
 
 ### Added

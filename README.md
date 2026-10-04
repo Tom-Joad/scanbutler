@@ -595,6 +595,32 @@ workflows, to sort documents.
 Tested with Paperless-ngx 3.2. The task format of version 2 is supported as
 well.
 
+### Shared tags
+
+Paperless gives every new tag an owner, the user who created it, and other
+users only see tags that have no owner or are shared with them. On an
+instance with several users, a tag that one of them, or an AI tagger,
+creates is therefore invisible to everyone else. Paperless has no setting
+that makes new tags ownerless.
+
+Set `PAPERLESS_SHARE_TAGS=true`, and the container takes care of it. Every
+`PAPERLESS_SHARE_TAGS_MINUTES` (default 1), it removes the owner and any
+explicit permissions from every tag that has an owner. Every user with the
+global tag permissions may then see and change the tag.
+
+- The token needs permission to change other users' tags, in practice a
+  superuser's. With a weaker one, a warning is logged once, and uploads
+  carry on.
+- `PAPERLESS_SHARE_TAGS_READONLY` takes comma-separated tag names, for
+  example `ai-processed`, a marker an AI tagger uses to find work. Those tags
+  keep their owner, every other user may see them, and nobody else may
+  change them. A read-only tag without an owner is left alone with a
+  warning: give it one in Paperless.
+- A check with nothing to do costs one request for the tag list. The log
+  names every tag that was shared (`tags shared`).
+- This works on tags only. Correspondents and document types keep their
+  owners.
+
 ## Rate limits and cost
 
 Mistral limits requests per second and tokens per minute. The limits depend

@@ -93,6 +93,9 @@ token that has the `read:packages` scope.
 - If Paperless is down, files wait in the inbox and are retried every 5
   minutes. A file that was already uploaded once is not uploaded again; it
   moves to `failed/` with the Paperless document number.
+- `PAPERLESS_SHARE_TAGS=true` makes every tag ownerless, so that all
+  Paperless users see the same tags. It needs a superuser token. See
+  *Shared tags* in the project README.
 
 ### Failures and pauses
 
