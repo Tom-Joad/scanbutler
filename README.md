@@ -317,7 +317,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `WORK_RETENTION_DAYS` | `30` | Days after which the work folder of a processed file is deleted; `rebuild` works until then. A `rebuild` restarts the count. `0` keeps everything |
 | `TMPDIR` | `$WORK_DIR/tmp` | Temporary page images, several GB for a large stack; on disk, not in RAM |
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
-| `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up. A PDF that isn't completely written (no `%%EOF` at its end) waits up to 10 minutes longer |
+| `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up. A PDF that isn't completely written (no `%%EOF` at its end), or an empty one, waits up to 10 minutes longer and then moves to `failed/`. Any file still waiting after 10 minutes is named once in the log as `file still waiting`, with the reason |
 
 **Paperless-ngx input**
 
