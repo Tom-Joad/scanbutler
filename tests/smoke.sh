@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test of the image: version, settings check, the watcher runs as
-# PUID, creates the input folders, keeps the health check's heartbeat going,
+# PUID, creates the input folders (handing root-owned ones to PUID), runs
+# both Paperless inputs and tag sharing against an unreachable Paperless,
+# keeps the health check's heartbeat going,
 # the OCR tools and language models are installed, and a language beyond
 # the built-in ones is downloaded (or left out when it can't be). No
 # document is processed and Mistral is never called.
@@ -13,6 +15,8 @@ IMAGE=${1:?usage: smoke.sh <image>}
 WORK=$(mktemp -d)
 NAME=scanbutler-smoke-$$
 SECRET=smoke-test-api-key-$$
+PL_SECRET=smoke-test-paperless-token-$$
+PL2_SECRET=smoke-test-paperless-2-token-$$
 TESSDATA_URL=${SMOKE_TESSDATA_URL:-}
 # Use the caller's IDs so the test can clean up; abc must not be root.
 PUID=$(id -u); PGID=$(id -g)
@@ -76,10 +80,16 @@ in_log '"event":"languages ready","languages":"deu\+eng".*"missing":\["por"\]' |
 [[ $(docker inspect -f '{{.State.Status}}' "$NAME") == running ]] || fail "stopped without the language"
 docker rm -f "$NAME" >/dev/null
 
-echo "== start (downloads fra)"
+echo "== start (downloads fra; both Paperless inputs and tag sharing on)"
 mkdir -p "$WORK/config" "$WORK/data"
+# An input folder Docker would have created itself belongs to root; the
+# init must hand it to abc.
+docker run --rm --entrypoint sh -v "$WORK/data:/d" "$IMAGE" -c 'mkdir /d/paperless-2' >/dev/null
+# Nothing listens on port 9: Paperless counts as unreachable.
 docker run -d --name "$NAME" -e PUID="$PUID" -e PGID="$PGID" -e MISTRAL_API_KEY="$SECRET" \
     -e OCRMYPDF_LANGUAGES=deu+eng+fra ${TESSDATA_URL:+-e TESSDATA_URL="$TESSDATA_URL"} \
+    -e PAPERLESS_URL=http://127.0.0.1:9 -e PAPERLESS_TOKEN="$PL_SECRET" \
+    -e PAPERLESS_2_TOKEN="$PL2_SECRET" -e PAPERLESS_SHARE_TAGS=true \
     -v "$WORK/config:/config" -v "$WORK/data:/data" "$IMAGE" >/dev/null
 for _ in $(seq 1 60); do
     in_log '"event":"watching inbox"' && break
@@ -103,16 +113,26 @@ USERS=$(docker exec "$NAME" ps -eo user,args | awk '/python3 -m scanbutler run/ 
 [[ -n $USERS ]] || fail "watcher not running"
 [[ $USERS != *root* ]] || fail "watcher runs as root"
 
-for dir in stacks/inbox scanner/inbox; do
+in_log '"event":"watching inbox","profile":"paperless-2"' || fail "the second Paperless input did not start"
+for _ in $(seq 1 30); do
+    in_log '"event":"tags could not be shared' && break
+    sleep 1
+done
+in_log '"event":"tags could not be shared' || fail "tag sharing did not run"
+[[ $(docker inspect -f '{{.State.Status}}' "$NAME") == running ]] || fail "stopped with Paperless unreachable"
+
+for dir in stacks/inbox scanner/inbox paperless/inbox paperless-2 paperless-2/inbox; do
     [[ -d $WORK/data/$dir ]] || fail "$dir was not created"
     [[ $(stat -c %u "$WORK/data/$dir") == "$PUID" ]] || fail "$dir not owned by PUID"
 done
 [[ $(stat -c %u "$WORK/config") == "$PUID" ]] || fail "/config not owned by PUID"
 
-# The API key is never written to a file or the log.
-if docker exec "$NAME" grep -rqs "$SECRET" /config /data /tmp /app; then
-    fail "the API key was written to a file"
-fi
-if in_log "$SECRET"; then fail "the API key is in the log"; fi
+# The API key and the tokens are never written to a file or the log.
+for secret in "$SECRET" "$PL_SECRET" "$PL2_SECRET"; do
+    if docker exec "$NAME" grep -rqs "$secret" /config /data /tmp /app; then
+        fail "a secret was written to a file"
+    fi
+    if in_log "$secret"; then fail "a secret is in the log"; fi
+done
 
 echo "OK"

@@ -284,7 +284,7 @@ Debian base and behaves like their containers: it starts as root, gives the
 | `-e UMASK` | `022` | Permission mask for new files; `002` makes them writable for the group |
 | `-e TZ` | `Etc/UTC` | Time zone, e.g. `Europe/Berlin` |
 | `-v /config` | | Work folder: plans, caches, review files, the Paperless upload ledger, temporary page images and downloaded languages |
-| `-v /data` | | The inputs: `stacks/`, `scanner/`, `paperless/` |
+| `-v /data` | | The inputs: `stacks/`, `scanner/`, `paperless/`, `paperless-2/` |
 
 Don't run the container with `--user` or `--init`: the base image's init
 system (s6-overlay) has to start as root and as process 1. Docker mods
@@ -329,6 +329,11 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `PAPERLESS_TAGS` | — | Comma-separated tag ids to add on upload, e.g. `3,7` |
 | `PAPERLESS_TEXT_SOURCE` | `tesseract` | `mistral` replaces the document's content in Paperless with Mistral OCR's text, tables included; see [below](#paperless-ngx-input) |
 | `PAPERLESS_MAX_WAIT_MINUTES` | `30` | How long to wait for Paperless to consume a file before trying again later |
+| `PAPERLESS_2_TOKEN` | — | API token of a second Paperless user; setting it enables `paperless-2/inbox/`, whose uploads belong to that user; see [A second Paperless user](#a-second-paperless-user) |
+| `PAPERLESS_2_URL` | `PAPERLESS_URL` | Paperless URL for the second input |
+| `PAPERLESS_2_DIR` | `$DATA_DIR/paperless-2` | Root of the second input |
+| `PAPERLESS_2_TAGS` | — | Comma-separated tag ids for uploads through the second input |
+| `PAPERLESS_2_TEXT_SOURCE` | `tesseract` | As `PAPERLESS_TEXT_SOURCE`, for the second input |
 | `PAPERLESS_SHARE_TAGS` | `false` | `true` removes the owner from every tag, so all users see it; needs a superuser token; see [Shared tags](#shared-tags) |
 | `PAPERLESS_SHARE_TAGS_MINUTES` | `1` | How often the tags are checked |
 | `PAPERLESS_SHARE_TAGS_READONLY` | — | Comma-separated tag names that keep their owner and are only visible to other users, e.g. `ai-processed` |
@@ -637,8 +642,9 @@ explicit permissions from every tag that has an owner. Every user with the
 global tag permissions may then see and change the tag.
 
 - The token needs permission to change other users' tags, in practice a
-  superuser's. With a weaker one, a warning is logged once, and uploads
-  carry on.
+  superuser's. With a weaker one, `tags could not be shared` is logged once
+  with HTTP 403, and uploads carry on. The same happens while Paperless is
+  unreachable.
 - `PAPERLESS_SHARE_TAGS_READONLY` takes comma-separated tag names, for
   example `ai-processed`, a marker an AI tagger uses to find work. Those tags
   keep their owner, every other user may see them, and nobody else may
