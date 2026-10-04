@@ -72,6 +72,11 @@ class PauseGate:
             extra={"error": reason[:300], "retry_minutes": round(self.retry_seconds / 60, 1)},
         )
 
+    def skip_probe(self) -> None:
+        """The probe file said nothing about Mistral (e.g. it was empty); let another one try."""
+        with self._lock:
+            self._probing = False
+
     def done(self) -> None:
         """A file finished without a limit error: the account works again."""
         with self._lock:

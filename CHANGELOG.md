@@ -5,6 +5,20 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- An empty PDF (0 bytes) in an inbox waited forever without a word in the
+  log, while the queue webhook counted it. After 10 minutes unchanged it
+  now moves to `failed/`, with `empty file (0 bytes)` in its `.error.txt`.
+  As a pause probe, it no longer ends a Mistral pause.
+
+### Added
+- A file still waiting after 10 minutes is named once in the log:
+  `file still waiting`, with its size and the reason (`empty`,
+  `still changing`, `incomplete`). A file that keeps changing, such as a
+  stuck copy, is only named, never moved.
+
 ## [1.4.1] - 2026-10-04
 
 ### Fixed

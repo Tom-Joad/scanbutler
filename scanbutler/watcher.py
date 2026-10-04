@@ -34,9 +34,15 @@ log = logging.getLogger(__name__)
 HEARTBEAT = Path("/tmp/scanbutler.heartbeat")
 PAPERLESS_RETRY_SECONDS = 300
 FOLDER_RETRY_SECONDS = 60
-# A PDF without its end is taken as still being written; only after this long
-# without change is it processed anyway (and then fails with a clear error).
+# A PDF without its end, or an empty one, is taken as still being written;
+# only after this long without change is it processed anyway (and then fails
+# with a clear error). A file still waiting after this long is named in the
+# log once, with the reason.
 INCOMPLETE_GRACE_SECONDS = 600
+
+
+class EmptyFile(ValueError):
+    """A file of 0 bytes: nothing to process, retrying won't help."""
 
 
 class InboxWatcher:
@@ -62,6 +68,9 @@ class InboxWatcher:
         # path -> (size, mtime_ns, monotonic time the file last changed)
         self._seen: dict[Path, tuple[int, int, float]] = {}
         self._incomplete_logged: set[tuple[Path, int]] = set()
+        # path -> monotonic time it was first seen, however often it changed since
+        self._first_seen: dict[Path, float] = {}
+        self._waiting_logged: set[Path] = set()
 
     def _candidates(self) -> list[Path]:
         inbox = self.profile.inbox
@@ -78,23 +87,45 @@ class InboxWatcher:
             self._seen.pop(path, None)
             return False
         size, mtime = stat.st_size, stat.st_mtime_ns
+        self._first_seen.setdefault(path, now)
         previous = self._seen.get(path)
+        grace = max(INCOMPLETE_GRACE_SECONDS, self.settings.stable_seconds)
         if previous is None or previous[:2] != (size, mtime):
             self._seen[path] = (size, mtime, now)
             if not (self.settings.stable_seconds == 0 and size > 0):
-                return False
+                return self._still_waiting(path, now, size, "still changing" if previous else "just arrived")
             unchanged = 0.0
         else:
             unchanged = now - previous[2]
-            if size == 0 or unchanged < self.settings.stable_seconds:
+            if size == 0:
+                # Maybe a scanner that creates the file first and fills it
+                # later; after the grace period it fails as empty.
+                return unchanged >= grace or self._still_waiting(path, now, size, "empty")
+            if unchanged < self.settings.stable_seconds:
                 return False
         if looks_complete(path):
             return True
-        if unchanged >= max(INCOMPLETE_GRACE_SECONDS, self.settings.stable_seconds):
+        if unchanged >= grace:
             return True  # truly damaged: let it fail with an error file
         if previous is not None and previous[:2] == (size, mtime) and (path, size) not in self._incomplete_logged:
             self._incomplete_logged.add((path, size))
             log.info("file not completely written yet, waiting", extra={"profile": self.profile.name, "file": path.name})
+        return self._still_waiting(path, now, size, "incomplete")
+
+    def _still_waiting(self, path: Path, now: float, size: int, reason: str) -> bool:
+        """Name a file in the log once when it has waited longer than the grace period."""
+        if now - self._first_seen[path] >= INCOMPLETE_GRACE_SECONDS and path not in self._waiting_logged:
+            self._waiting_logged.add(path)
+            log.warning(
+                "file still waiting",
+                extra={
+                    "profile": self.profile.name,
+                    "file": path.name,
+                    "bytes": size,
+                    "reason": reason,
+                    "minutes": round((now - self._first_seen[path]) / 60),
+                },
+            )
         return False
 
     def _move(self, src: Path, root: Path, folder: PurePosixPath) -> Path:
@@ -122,6 +153,8 @@ class InboxWatcher:
 
     def _process(self, path: Path, folder: PurePosixPath, before: tuple[int, int] | None) -> None:
         try:
+            if before is not None and before[0] == 0:
+                raise EmptyFile("empty file (0 bytes): nothing to process")
             with priority.marked(self.profile.priority):
                 if self.profile.upload:
                     process_for_paperless(path, folder, self.settings, self.paperless, self.profile, self.backend)
@@ -152,7 +185,9 @@ class InboxWatcher:
                     extra={"profile": self.profile.name, "source": (folder / path.name).as_posix(), "error": str(exc)[:300]},
                 )
                 return
-            if self.profile.uses_mistral:  # a plain Paperless upload says nothing about Mistral
+            if isinstance(exc, EmptyFile):
+                self.gate.skip_probe()  # Mistral was never asked
+            elif self.profile.uses_mistral:  # a plain Paperless upload says nothing about Mistral
                 self.gate.done()
             log.exception("stack failed", extra={"profile": self.profile.name, "source": (folder / path.name).as_posix()})
             target = self._move(path, self.profile.failed, folder)
@@ -184,6 +219,8 @@ class InboxWatcher:
                     break
         # Forget files that vanished from the inbox.
         self._seen = {p: v for p, v in self._seen.items() if p.exists()}
+        self._first_seen = {p: v for p, v in self._first_seen.items() if p in self._seen}
+        self._waiting_logged &= set(self._seen)
 
     def _may_start(self) -> bool:
         # Plain Paperless uploads need no Mistral, so a Mistral pause doesn't stop them.
