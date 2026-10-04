@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.4.0] - 2026-10-04
 
 ### Changed
 - Every log line written while a file is being worked on names it in
@@ -324,6 +324,7 @@ First public release.
 [1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v1.0.0
+[1.4.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
