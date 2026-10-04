@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.5.0] - 2026-10-04
 
 ### Added
 - **Shared correspondents and document types.**
@@ -366,6 +366,7 @@ First public release.
 [1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v1.0.0
+[1.5.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.4.2...v1.5.0
 [1.4.2]: https://github.com/Tom-Joad/scanbutler/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.3.1...v1.4.0
