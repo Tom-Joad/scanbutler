@@ -334,8 +334,10 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `PAPERLESS_2_DIR` | `$DATA_DIR/paperless-2` | Root of the second input |
 | `PAPERLESS_2_TAGS` | — | Comma-separated tag ids for uploads through the second input |
 | `PAPERLESS_2_TEXT_SOURCE` | `tesseract` | As `PAPERLESS_TEXT_SOURCE`, for the second input |
-| `PAPERLESS_SHARE_TAGS` | `false` | `true` removes the owner from every tag, so all users see it; needs a superuser token; see [Shared tags](#shared-tags) |
-| `PAPERLESS_SHARE_TAGS_MINUTES` | `1` | How often the tags are checked |
+| `PAPERLESS_SHARE_TAGS` | `false` | `true` removes the owner from every tag, so all users see it; needs a superuser token; see [Shared tags, correspondents and document types](#shared-tags-correspondents-and-document-types) |
+| `PAPERLESS_SHARE_CORRESPONDENTS` | `false` | The same for correspondents |
+| `PAPERLESS_SHARE_DOCUMENT_TYPES` | `false` | The same for document types |
+| `PAPERLESS_SHARE_TAGS_MINUTES` | `1` | How often they are checked, for all three kinds |
 | `PAPERLESS_SHARE_TAGS_READONLY` | — | Comma-separated tag names that keep their owner and are only visible to other users, e.g. `ai-processed` |
 
 **Naming**
@@ -628,33 +630,37 @@ like the first, with its own duplicate register in
 `work/paperless-2/uploaded.json`: the same scan may go to both users. Every
 call it makes, uploads and content replacement included, uses its own token.
 
-### Shared tags
+### Shared tags, correspondents and document types
 
-Paperless gives every new tag an owner, the user who created it, and other
-users only see tags that have no owner or are shared with them. On an
-instance with several users, a tag that one of them, or an AI tagger,
-creates is therefore invisible to everyone else. Paperless has no setting
-that makes new tags ownerless.
+Paperless gives every new tag, correspondent and document type an owner,
+the user who created it, and other users only see those that have no owner
+or are shared with them. On an instance with several users, what one of
+them, or an AI tagger, creates is therefore invisible to everyone else.
+Paperless has no setting that makes new ones ownerless.
 
-Set `PAPERLESS_SHARE_TAGS=true`, and the container takes care of it. Every
-`PAPERLESS_SHARE_TAGS_MINUTES` (default 1), it removes the owner and any
-explicit permissions from every tag that has an owner. Every user with the
-global tag permissions may then see and change the tag.
+Set `PAPERLESS_SHARE_TAGS=true`, `PAPERLESS_SHARE_CORRESPONDENTS=true` and
+`PAPERLESS_SHARE_DOCUMENT_TYPES=true`, each on its own, and the container
+takes care of it. Every `PAPERLESS_SHARE_TAGS_MINUTES` (default 1), it
+removes the owner and any explicit permissions from every object of those
+kinds that has an owner. Every user with the global permissions for that
+kind may then see and change it.
 
-- The token needs permission to change other users' tags, in practice a
-  superuser's. With a weaker one, `tags could not be shared` is logged once
-  with HTTP 403, and uploads carry on. The same happens while Paperless is
-  unreachable.
-- `PAPERLESS_SHARE_TAGS_READONLY` takes comma-separated tag names, for
+- The token needs permission to change other users' objects, in practice a
+  superuser's. With a weaker one, `tags could not be shared` (or
+  `correspondents …`, `document types …`) is logged once with HTTP 403, and
+  the other kinds and the uploads carry on. The same happens while
+  Paperless is unreachable.
+- Shared correspondents show every user who writes to whom: a bank, an
+  employer, a doctor. Switch them on only where all users may see that.
+- `PAPERLESS_SHARE_TAGS_READONLY` (tags only) takes comma-separated tag names, for
   example `ai-processed`, a marker an AI tagger uses to find work. Those tags
   keep their owner, every other user may see them, and nobody else may
   change them. A read-only tag without an owner is left alone with a
   warning: give it one in Paperless.
-- A check with nothing to do costs one request for the tag list. The log
-  says how many tags were shared, with their ids (`tags shared`), never
-  their names.
-- This works on tags only. Correspondents and document types keep their
-  owners.
+- A check with nothing to do costs one list request per kind. The log says
+  how many were shared, with their ids (`tags shared`,
+  `correspondents shared`, `document types shared`), never their names.
+- Storage paths and custom fields keep their owners.
 
 ## Rate limits and cost
 

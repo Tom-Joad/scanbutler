@@ -96,9 +96,11 @@ token that has the `read:packages` scope.
 - For a second Paperless user, set `PAPERLESS_2_TOKEN` and the *Paperless 2*
   path in the advanced view. Files there are uploaded as that user and
   belong to them. See *A second Paperless user* in the project README.
-- `PAPERLESS_SHARE_TAGS=true` makes every tag ownerless, so that all
-  Paperless users see the same tags. It needs a superuser token. See
-  *Shared tags* in the project README.
+- `PAPERLESS_SHARE_TAGS=true`, `PAPERLESS_SHARE_CORRESPONDENTS=true` and
+  `PAPERLESS_SHARE_DOCUMENT_TYPES=true` make every tag, correspondent or
+  document type ownerless, so that all Paperless users see the same ones.
+  They need a superuser token. See *Shared tags, correspondents and
+  document types* in the project README.
 
 ### Failures and pauses
 

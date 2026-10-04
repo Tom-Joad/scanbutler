@@ -5,6 +5,23 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Added
+- **Shared correspondents and document types.**
+  `PAPERLESS_SHARE_CORRESPONDENTS=true` and
+  `PAPERLESS_SHARE_DOCUMENT_TYPES=true` keep them ownerless, as
+  `PAPERLESS_SHARE_TAGS` does for tags, in the same check every
+  `PAPERLESS_SHARE_TAGS_MINUTES`. All users then see the same ones. Shared
+  correspondents show every user who writes to whom.
+
+### Changed
+- If one kind can't be shared (e.g. HTTP 403), the others still are, and
+  each kind logs its own `… could not be shared` once.
+- The startup lines say `sharing paperless objects` with the kinds, and
+  `starting` has `paperless_share` (a list) instead of
+  `paperless_share_tags`.
+
 ## [1.4.2] - 2026-10-04
 
 ### Fixed
