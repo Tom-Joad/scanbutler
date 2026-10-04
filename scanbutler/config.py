@@ -240,6 +240,8 @@ class Settings:
     paperless_token: str
     paperless_max_wait_minutes: float
     paperless_share_tags: bool
+    paperless_share_correspondents: bool
+    paperless_share_document_types: bool
     paperless_share_tags_readonly: tuple[str, ...]
     paperless_share_tags_minutes: float
     queue_webhook_url: str
@@ -323,8 +325,15 @@ class Settings:
                 )
             )
         share_tags = _bool("PAPERLESS_SHARE_TAGS", False)
-        if share_tags and not paperless_url:
-            raise ConfigError("PAPERLESS_SHARE_TAGS needs PAPERLESS_URL and PAPERLESS_TOKEN")
+        share_correspondents = _bool("PAPERLESS_SHARE_CORRESPONDENTS", False)
+        share_document_types = _bool("PAPERLESS_SHARE_DOCUMENT_TYPES", False)
+        for name, on in (
+            ("PAPERLESS_SHARE_TAGS", share_tags),
+            ("PAPERLESS_SHARE_CORRESPONDENTS", share_correspondents),
+            ("PAPERLESS_SHARE_DOCUMENT_TYPES", share_document_types),
+        ):
+            if on and not paperless_url:
+                raise ConfigError(f"{name} needs PAPERLESS_URL and PAPERLESS_TOKEN")
         share_minutes = _float("PAPERLESS_SHARE_TAGS_MINUTES", 1.0)
         if share_minutes <= 0:
             raise ConfigError(f"PAPERLESS_SHARE_TAGS_MINUTES must be > 0, got {share_minutes}")
@@ -386,6 +395,8 @@ class Settings:
             paperless_token=paperless_token,
             paperless_max_wait_minutes=_float("PAPERLESS_MAX_WAIT_MINUTES", 30.0),
             paperless_share_tags=share_tags,
+            paperless_share_correspondents=share_correspondents,
+            paperless_share_document_types=share_document_types,
             paperless_share_tags_readonly=tuple(
                 name.strip() for name in os.environ.get("PAPERLESS_SHARE_TAGS_READONLY", "").split(",") if name.strip()
             ),
@@ -395,6 +406,19 @@ class Settings:
             queue_webhook_heartbeat_seconds=_int("QUEUE_WEBHOOK_HEARTBEAT_SECONDS", 300, minimum=10),
             work_retention_days=max(0.0, _float("WORK_RETENTION_DAYS", 30.0)),
             log_level=_str("LOG_LEVEL", "INFO"),
+        )
+
+    @property
+    def paperless_share_kinds(self) -> tuple[str, ...]:
+        """The Paperless object kinds to keep ownerless, as API names."""
+        return tuple(
+            kind
+            for kind, on in (
+                ("tags", self.paperless_share_tags),
+                ("correspondents", self.paperless_share_correspondents),
+                ("document_types", self.paperless_share_document_types),
+            )
+            if on
         )
 
     def profile(self, name: str) -> Profile:

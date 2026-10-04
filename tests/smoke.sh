@@ -106,6 +106,7 @@ docker run -d --name "$NAME" -e PUID="$PUID" -e PGID="$PGID" -e MISTRAL_API_KEY=
     -e OCRMYPDF_LANGUAGES=deu+eng+fra ${TESSDATA_URL:+-e TESSDATA_URL="$TESSDATA_URL"} \
     -e PAPERLESS_URL=http://127.0.0.1:9 -e PAPERLESS_TOKEN="$PL_SECRET" \
     -e PAPERLESS_2_TOKEN="$PL2_SECRET" -e PAPERLESS_SHARE_TAGS=true \
+    -e PAPERLESS_SHARE_CORRESPONDENTS=true -e PAPERLESS_SHARE_DOCUMENT_TYPES=true \
     -v "$WORK/config:/config" -v "$WORK/data:/data" "$IMAGE" >/dev/null
 for _ in $(seq 1 60); do
     in_log '"event":"watching inbox"' && break
@@ -145,6 +146,8 @@ for _ in $(seq 1 30); do
     sleep 1
 done
 in_log '"event":"tags could not be shared' || fail "tag sharing did not run"
+in_log '"event":"correspondents could not be shared' || fail "correspondent sharing did not run"
+in_log '"event":"document types could not be shared' || fail "document type sharing did not run"
 [[ $(docker inspect -f '{{.State.Status}}' "$NAME") == running ]] || fail "stopped with Paperless unreachable"
 
 for dir in stacks/inbox scanner/inbox paperless/inbox paperless-2 paperless-2/inbox; do

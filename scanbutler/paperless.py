@@ -120,23 +120,27 @@ class PaperlessClient:
                 return items
             page += 1
 
+    def objects(self, kind: str) -> list[dict]:
+        """Every object of `kind` (tags, correspondents, document_types) the
+        token may see, with its owner and permissions."""
+        return self._all(f"/api/{kind}/", {"full_perms": "true"})
+
     def tags(self) -> list[dict]:
-        """Every tag the token may see, with its owner and permissions."""
-        return self._all("/api/tags/", {"full_perms": "true"})
+        return self.objects("tags")
 
     def user_ids(self) -> list[int]:
         return [user["id"] for user in self._all("/api/users/")]
 
-    def set_tag_permissions(
-        self, ids: list[int], owner: int | None, view_users: list[int] = (), change_users: list[int] = ()
+    def set_permissions(
+        self, kind: str, ids: list[int], owner: int | None, view_users: list[int] = (), change_users: list[int] = ()
     ) -> None:
-        """Replace owner and permissions of the given tags in one call."""
+        """Replace owner and permissions of the given objects of `kind` in one call."""
         self._request(
             "POST",
             "/api/bulk_edit_objects/",
             json={
                 "objects": list(ids),
-                "object_type": "tags",
+                "object_type": kind,
                 "operation": "set_permissions",
                 "owner": owner,
                 "merge": False,
@@ -146,6 +150,11 @@ class PaperlessClient:
                 },
             },
         )
+
+    def set_tag_permissions(
+        self, ids: list[int], owner: int | None, view_users: list[int] = (), change_users: list[int] = ()
+    ) -> None:
+        self.set_permissions("tags", ids, owner, view_users, change_users)
 
     def wait(self, task_id: str, poll_seconds: float, max_wait_seconds: float) -> dict | None:
         """The finished task, or None if it is still running after max_wait_seconds."""
