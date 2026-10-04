@@ -168,6 +168,33 @@ it fresh from the Unraid template or `docker-compose.yml`.
 Versions before 1.0 were pre-releases under the name `scan-stack-splitter`.
 They are listed for reference only.
 
+## [0.13.0] - 2026-10-03
+
+Test build for 1.0.0. Everything in it is part of 1.0.0, see there.
+
+### Changed
+- Renamed to Scanbutler: the Python package, the container command
+  (`stacksplit` → `scanbutler`), the image `ghcr.io/tom-joad/scanbutler`,
+  the Unraid template and its default folders. Settings and folder layout
+  are unchanged.
+- Built on linuxserver.io's Debian 13 base with s6-overlay: `PUID`, `PGID`,
+  `UMASK` and `TZ` instead of `--user`, the work folder at `/config`,
+  temporary page images in `/config/tmp`. The watcher and commands run with
+  `docker exec` run as `abc`.
+- Input folders that Docker created as root are handed to `abc`; a folder
+  the watcher can't create is reported with the IDs in use and retried.
+
+### Fixed
+- Invisible Unicode format characters are dropped from generated file
+  names.
+
+### Security
+- The base image is pinned by digest, and packages are upgraded at build
+  time. pip is removed from the final image.
+- Ghostscript downsampling has a time limit.
+- httpcore stays quiet even with `LOG_LEVEL=DEBUG`, so the webhook URL is
+  never logged.
+
 ## [0.12.0] - 2026-10-03
 
 ### Changed
@@ -383,7 +410,8 @@ First public release.
 [1.3.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.12.0...v1.0.0
+[1.0.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.13.0...v1.0.0
+[0.13.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.1...v0.12.0
 [0.11.1]: https://github.com/Tom-Joad/scanbutler/compare/v0.11.0...v0.11.1
 [0.11.0]: https://github.com/Tom-Joad/scanbutler/compare/v0.10.0...v0.11.0
