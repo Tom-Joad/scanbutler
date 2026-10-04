@@ -6,6 +6,7 @@ if [ "$(id -u)" = 0 ] && [ "$(cat /proc/1/comm 2>/dev/null)" = "s6-svscan" ]; th
     if [ -n "${UMASK}" ]; then
         umask "${UMASK}"
     fi
-    exec /command/s6-setuidgid abc python3 -m scanbutler "$@"
+    # abc's home, as for the watcher; root's /root is closed to abc.
+    HOME=/config exec /command/s6-setuidgid abc python3 -m scanbutler "$@"
 fi
 exec python3 -m scanbutler "$@"
