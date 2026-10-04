@@ -54,8 +54,14 @@ def task_message(task: dict) -> str:
     return "no details from Paperless"
 
 
+def client_for(target) -> "PaperlessClient":
+    """A client that acts as the user of a Paperless input (a config.PaperlessTarget)."""
+    return PaperlessClient(target.url, target.token, token_setting=target.token_setting)
+
+
 class PaperlessClient:
-    def __init__(self, url: str, token: str, timeout: float = 120.0) -> None:
+    def __init__(self, url: str, token: str, timeout: float = 120.0, token_setting: str = "PAPERLESS_TOKEN") -> None:
+        self._token_setting = token_setting
         self._http = httpx.Client(
             base_url=url.rstrip("/"),
             timeout=httpx.Timeout(timeout, connect=15.0),
@@ -71,7 +77,7 @@ class PaperlessClient:
         except httpx.TransportError as exc:
             raise PaperlessUnavailable(f"{type(exc).__name__}: {exc}") from exc
         if response.status_code in (401, 403):
-            raise PaperlessUnavailable(f"HTTP {response.status_code}: token rejected, check PAPERLESS_TOKEN")
+            raise PaperlessUnavailable(f"HTTP {response.status_code}: token rejected, check {self._token_setting}")
         if response.status_code >= 500:
             raise PaperlessUnavailable(f"HTTP {response.status_code}: {response.text[:200]}")
         if response.status_code >= 400:

@@ -25,7 +25,7 @@ from .pdfops import looks_complete
 from .naming import unique_path
 from .notify import QueueReporter
 from .pause import PauseGate, limit_error_in
-from .paperless import PaperlessClient, PaperlessUnavailable
+from .paperless import PaperlessClient, PaperlessUnavailable, client_for
 from .pipeline import AlreadyInProgress, process_for_paperless, process_stack
 from .sharing import TagSharer
 
@@ -261,7 +261,6 @@ def run_all(settings: Settings, backend) -> None:
         threading.Thread(target=reporter.run, args=(stop,), name="queue-webhook", daemon=True).start()
         log.info("queue webhook enabled", extra={"heartbeat_s": settings.queue_webhook_heartbeat_seconds})
 
-    paperless = PaperlessClient(settings.paperless_url, settings.paperless_token) if settings.paperless_url else None
     if settings.paperless_share_tags:
         sharer = TagSharer(
             PaperlessClient(settings.paperless_url, settings.paperless_token),
@@ -271,7 +270,10 @@ def run_all(settings: Settings, backend) -> None:
         threading.Thread(target=sharer.run, args=(stop,), name="share-tags", daemon=True).start()
     workers = [
         threading.Thread(
-            target=InboxWatcher(settings, profile, backend, stop, reporter, gate, paperless).run,
+            # Each Paperless input uploads with its own token, as its own user.
+            target=InboxWatcher(
+                settings, profile, backend, stop, reporter, gate, client_for(profile.paperless) if profile.upload else None
+            ).run,
             name=profile.name,
             daemon=True,
         )

@@ -13,7 +13,7 @@ from pathlib import Path, PurePosixPath
 from . import __version__, languages, logging_setup, pdfops
 from .config import ConfigError, Settings, available_cpus, memory_limit_bytes
 from .mistral import MistralClient
-from .paperless import PaperlessClient
+from .paperless import client_for
 from .pipeline import process_for_paperless, process_stack, rebuild
 from .watcher import run_all
 
@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     one.add_argument(
         "--profile",
         default="stacks",
-        choices=["stacks", "scanner", "paperless"],
+        choices=["stacks", "scanner", "paperless", "paperless-2"],
         help="stacks: split; scanner: one document per file; paperless: text layer, then upload",
     )
     again = sub.add_parser("rebuild", help="re-cut a stack from its edited plan.json")
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
         if command == "process":
             profile = settings.profile(args.profile)
             if profile.upload:
-                paperless = PaperlessClient(settings.paperless_url, settings.paperless_token)
+                paperless = client_for(profile.paperless)
                 try:
                     document = process_for_paperless(
                         args.pdf, PurePosixPath(args.folder), settings, paperless, profile, client

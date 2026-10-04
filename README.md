@@ -150,6 +150,7 @@ On first start, the container creates this layout under `DATA_PATH`:
 stacks/     inbox/  output/  archive/  failed/
 scanner/    inbox/  output/  archive/  failed/
 paperless/  inbox/          archive/  failed/    (only with PAPERLESS_URL set)
+paperless-2/ inbox/         archive/  failed/    (only with PAPERLESS_2_TOKEN set)
 ```
 
 Its own data (plans, caches, review files) goes to `CONFIG_PATH`, mounted
@@ -425,7 +426,7 @@ restart. The payload holds counts only, never file names:
   several files at once.
 - `failed` counts the PDFs in the `failed/` folders.
 - `profiles` has one entry per enabled input; `paperless` appears only when
-  `PAPERLESS_URL` is set.
+  `PAPERLESS_URL` is set, `paperless-2` only when `PAPERLESS_2_TOKEN` is.
 - `paused`, `pause_reason` and `paused_since` are always present. The last
   two are `null` unless processing is paused. `pause_reason` is Mistral's
   raw error text, up to 300 characters. `paused_since` is an ISO 8601
@@ -597,6 +598,30 @@ workflows, to sort documents.
 
 Tested with Paperless-ngx 3.2. The task format of version 2 is supported as
 well.
+
+### A second Paperless user
+
+Paperless makes the uploading user the owner of a document. When several
+people share one Paperless instance, each should own the documents scanned
+for them; otherwise permissions that limit someone to their own documents
+don't work.
+
+Set `PAPERLESS_2_TOKEN` to the API token of a second Paperless user, and a
+second inbox, `paperless-2/inbox/`, uploads as that user. Point a second
+scanner profile, or a second network folder, at it.
+
+| Setting | Default | |
+|---|---|---|
+| `PAPERLESS_2_TOKEN` | | enables the second input |
+| `PAPERLESS_2_URL` | `PAPERLESS_URL` | set it to upload to a different instance |
+| `PAPERLESS_2_DIR` | `/data/paperless-2` | |
+| `PAPERLESS_2_TAGS` | | tag ids for this input |
+| `PAPERLESS_2_TEXT_SOURCE` | `tesseract` | as `PAPERLESS_TEXT_SOURCE` |
+
+`PAPERLESS_MAX_WAIT_MINUTES` applies to both. The second input works exactly
+like the first, with its own duplicate register in
+`work/paperless-2/uploaded.json`: the same scan may go to both users. Every
+call it makes, uploads and content replacement included, uses its own token.
 
 ### Shared tags
 

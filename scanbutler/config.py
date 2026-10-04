@@ -7,7 +7,7 @@ tuning knobs all come from the container's environment (see .env.example).
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .languages import DEFAULT_URL as TESSDATA_DEFAULT_URL
@@ -129,6 +129,17 @@ def auto_jobs(memory_bytes: int | None, cpus: int) -> int:
 
 
 @dataclass(frozen=True)
+class PaperlessTarget:
+    """Where a Paperless input uploads to, and as which user."""
+
+    url: str
+    token: str = field(repr=False)
+    tags: tuple[int, ...]
+    # The setting that holds the token, for error messages.
+    token_setting: str = "PAPERLESS_TOKEN"
+
+
+@dataclass(frozen=True)
 class Profile:
     """One input channel with its own folders.
 
@@ -143,7 +154,16 @@ class Profile:
     # OCR, paid) or "tesseract" (the text layer ocrmypdf adds anyway, free).
     text_source: str = "mistral"
     # Hand the result to Paperless-ngx instead of writing it to output/.
-    upload: bool = False
+    paperless: PaperlessTarget | None = None
+
+    @property
+    def upload(self) -> bool:
+        return self.paperless is not None
+
+    @property
+    def env_prefix(self) -> str:
+        """Prefix of this input's settings: "paperless-2" -> "PAPERLESS_2"."""
+        return self.name.upper().replace("-", "_")
 
     @property
     def priority(self) -> bool:
@@ -218,7 +238,6 @@ class Settings:
     pause_retry_minutes: float
     paperless_url: str
     paperless_token: str
-    paperless_tags: tuple[int, ...]
     paperless_max_wait_minutes: float
     paperless_share_tags: bool
     paperless_share_tags_readonly: tuple[str, ...]
@@ -272,26 +291,37 @@ class Settings:
         ]
         paperless_url = os.environ.get("PAPERLESS_URL", "").strip()
         paperless_token = os.environ.get("PAPERLESS_TOKEN", "").strip()
-        if paperless_url:
-            if not paperless_token:
-                raise ConfigError("PAPERLESS_URL is set but PAPERLESS_TOKEN is not")
+        if paperless_url and not paperless_token:
+            raise ConfigError("PAPERLESS_URL is set but PAPERLESS_TOKEN is not")
+        # The second input uploads with its own token, so its documents
+        # belong to another Paperless user; by default on the same instance.
+        second_token = os.environ.get("PAPERLESS_2_TOKEN", "").strip()
+        second_url = _str("PAPERLESS_2_URL", paperless_url)
+        if os.environ.get("PAPERLESS_2_URL", "").strip() and not second_token:
+            raise ConfigError("PAPERLESS_2_URL is set but PAPERLESS_2_TOKEN is not")
+        if second_token and not second_url:
+            raise ConfigError("PAPERLESS_2_TOKEN needs PAPERLESS_URL or PAPERLESS_2_URL")
+        for name, url, token in (("paperless", paperless_url, paperless_token), ("paperless-2", second_url, second_token)):
+            if not (url and token):
+                continue
+            prefix = name.upper().replace("-", "_")
+            try:
+                tags = tuple(int(t) for t in os.environ.get(f"{prefix}_TAGS", "").replace(" ", "").split(",") if t)
+            except ValueError as exc:
+                raise ConfigError(f"{prefix}_TAGS must be comma-separated tag ids, e.g. 3,7") from exc
             # Paperless (and an AI tagger behind it) does the naming and
             # tagging; this input only adds the Tesseract text layer.
             profiles.append(
                 Profile(
-                    "paperless",
-                    Path(_str("PAPERLESS_DIR", str(data / "paperless"))),
+                    name,
+                    Path(_str(f"{prefix}_DIR", str(data / name))),
                     False,
                     # mistral: Mistral OCR's text (with tables) replaces the
                     # document's content in Paperless after upload.
-                    _str("PAPERLESS_TEXT_SOURCE", "tesseract").lower(),
-                    True,
+                    _str(f"{prefix}_TEXT_SOURCE", "tesseract").lower(),
+                    PaperlessTarget(url, token, tags, f"{prefix}_TOKEN"),
                 )
             )
-        try:
-            paperless_tags = [int(t) for t in os.environ.get("PAPERLESS_TAGS", "").replace(" ", "").split(",") if t]
-        except ValueError as exc:
-            raise ConfigError("PAPERLESS_TAGS must be comma-separated tag ids, e.g. 3,7") from exc
         share_tags = _bool("PAPERLESS_SHARE_TAGS", False)
         if share_tags and not paperless_url:
             raise ConfigError("PAPERLESS_SHARE_TAGS needs PAPERLESS_URL and PAPERLESS_TOKEN")
@@ -301,10 +331,10 @@ class Settings:
         for profile in profiles:
             if profile.text_source not in {"mistral", "tesseract"}:
                 raise ConfigError(
-                    f"{profile.name.upper()}_TEXT_SOURCE must be mistral or tesseract, got {profile.text_source!r}"
+                    f"{profile.env_prefix}_TEXT_SOURCE must be mistral or tesseract, got {profile.text_source!r}"
                 )
             if profile.text_source == "tesseract" and not profile.upload and not _bool("OCRMYPDF_ENABLED", True):
-                raise ConfigError(f"{profile.name.upper()}_TEXT_SOURCE=tesseract needs OCRMYPDF_ENABLED=true")
+                raise ConfigError(f"{profile.env_prefix}_TEXT_SOURCE=tesseract needs OCRMYPDF_ENABLED=true")
         if not profiles:
             raise ConfigError("STACKS_ENABLED and SCANNER_ENABLED are both off")
         return cls(
@@ -354,7 +384,6 @@ class Settings:
             pause_retry_minutes=_float("PAUSE_RETRY_MINUTES", 30.0),
             paperless_url=paperless_url,
             paperless_token=paperless_token,
-            paperless_tags=tuple(paperless_tags),
             paperless_max_wait_minutes=_float("PAPERLESS_MAX_WAIT_MINUTES", 30.0),
             paperless_share_tags=share_tags,
             paperless_share_tags_readonly=tuple(
