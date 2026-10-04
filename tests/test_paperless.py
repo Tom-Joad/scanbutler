@@ -281,3 +281,74 @@ def test_client_patches_the_content():
 
     client_with(handler).set_content(42, "| a | b |")
     assert seen == {"method": "PATCH", "path": "/api/documents/42/", "body": {"content": "| a | b |"}}
+
+
+# --- a second Paperless input with its own token ----------------------------
+
+
+def test_second_input_config(settings, monkeypatch):
+    monkeypatch.setenv("PAPERLESS_2_URL", "http://other.test:8000")
+    with pytest.raises(ConfigError, match="PAPERLESS_2_TOKEN"):
+        Settings.from_env()
+    monkeypatch.delenv("PAPERLESS_2_URL")
+    monkeypatch.setenv("PAPERLESS_2_TOKEN", "token-two")
+    with pytest.raises(ConfigError, match="PAPERLESS_URL or PAPERLESS_2_URL"):
+        Settings.from_env()
+
+    # Only a token: same instance as the first input, another user.
+    monkeypatch.setenv("PAPERLESS_URL", "http://paperless.test:8000")
+    monkeypatch.setenv("PAPERLESS_TOKEN", "first")
+    monkeypatch.setenv("PAPERLESS_2_TAGS", "5")
+    loaded = Settings.from_env()
+    first, second = loaded.profile("paperless"), loaded.profile("paperless-2")
+    assert (first.paperless.url, first.paperless.token, first.paperless.tags) == ("http://paperless.test:8000", "first", ())
+    assert (second.paperless.url, second.paperless.token, second.paperless.tags) == ("http://paperless.test:8000", "token-two", (5,))
+    assert second.root.name == "paperless-2" and second.upload and not second.split
+    assert "token-two" not in repr(second)  # tokens stay out of logs
+
+    monkeypatch.setenv("PAPERLESS_2_URL", "http://other.test:8000")
+    monkeypatch.setenv("PAPERLESS_2_TEXT_SOURCE", "ocr")
+    with pytest.raises(ConfigError, match="PAPERLESS_2_TEXT_SOURCE"):
+        Settings.from_env()
+    monkeypatch.delenv("PAPERLESS_2_TEXT_SOURCE")
+    assert Settings.from_env().profile("paperless-2").paperless.url == "http://other.test:8000"
+
+    # The second input works without the first one.
+    monkeypatch.delenv("PAPERLESS_URL")
+    monkeypatch.delenv("PAPERLESS_TOKEN")
+    assert [p.name for p in Settings.from_env().profiles if p.upload] == ["paperless-2"]
+
+
+def test_each_input_uploads_its_own_files_with_its_own_tags(paperless_settings, monkeypatch):
+    monkeypatch.setenv("PAPERLESS_2_TOKEN", "second")
+    monkeypatch.setenv("PAPERLESS_2_TAGS", "5")
+    settings = Settings.from_env()
+    first_client, second_client = FakePaperless(), FakePaperless()
+    first, first_profile, _ = watcher_for(settings, first_client)
+    second_profile = settings.profile("paperless-2")
+    second_profile.inbox.mkdir(parents=True, exist_ok=True)
+    second = InboxWatcher(settings, second_profile, FakeBackend([]), threading.Event(), paperless=second_client)
+    make_pdf(first_profile.inbox / "mine.pdf", 1)
+    make_pdf(second_profile.inbox / "theirs.pdf", 1)
+
+    first.poll_once()
+    second.poll_once()
+
+    assert first_client.uploads == [("mine.pdf", [3, 7])]
+    assert second_client.uploads == [("theirs.pdf", [5])]
+    assert (second_profile.archive / "theirs.pdf").exists()
+    # Separate duplicate registers: the same scan may go to both users.
+    assert (settings.work_dir / "paperless" / "uploaded.json").exists()
+    assert (settings.work_dir / "paperless-2" / "uploaded.json").exists()
+
+
+def test_a_rejected_token_names_its_setting(tmp_path, monkeypatch):
+    from scanbutler.config import PaperlessTarget
+    from scanbutler.paperless import client_for
+
+    pdf = tmp_path / "a.pdf"
+    make_pdf(pdf, 1)
+    client = client_for(PaperlessTarget("http://paperless.test:8000", "t", (), "PAPERLESS_2_TOKEN"))
+    client._http = httpx.Client(base_url="http://paperless.test:8000", transport=httpx.MockTransport(lambda r: httpx.Response(401)))
+    with pytest.raises(PaperlessUnavailable, match="check PAPERLESS_2_TOKEN"):
+        client.upload(pdf, "a.pdf", [])

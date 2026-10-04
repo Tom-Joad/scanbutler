@@ -81,14 +81,11 @@ class TagSharer:
                     log.info("tag sharing works again")
                     self._last_error = None
             except (PaperlessError, PaperlessUnavailable) as exc:
-                # Typically a token that may not change other users' tags.
-                # Logged once per distinct error, not every minute.
+                # Paperless away, or a token that may not change other users'
+                # tags (HTTP 403). Logged once per distinct error, not every minute.
                 message = str(exc)[:300]
                 if message != self._last_error:
-                    log.warning(
-                        "tags could not be shared; the token needs permission to change other users' tags",
-                        extra={"error": message},
-                    )
+                    log.warning("tags could not be shared", extra={"error": message})
                     self._last_error = message
             except Exception:  # noqa: BLE001 - sharing must never stop the uploads
                 log.exception("tag sharing failed")

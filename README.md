@@ -150,6 +150,7 @@ On first start, the container creates this layout under `DATA_PATH`:
 stacks/     inbox/  output/  archive/  failed/
 scanner/    inbox/  output/  archive/  failed/
 paperless/  inbox/          archive/  failed/    (only with PAPERLESS_URL set)
+paperless-2/ inbox/         archive/  failed/    (only with PAPERLESS_2_TOKEN set)
 ```
 
 Its own data (plans, caches, review files) goes to `CONFIG_PATH`, mounted
@@ -283,7 +284,7 @@ Debian base and behaves like their containers: it starts as root, gives the
 | `-e UMASK` | `022` | Permission mask for new files; `002` makes them writable for the group |
 | `-e TZ` | `Etc/UTC` | Time zone, e.g. `Europe/Berlin` |
 | `-v /config` | | Work folder: plans, caches, review files, the Paperless upload ledger, temporary page images and downloaded languages |
-| `-v /data` | | The inputs: `stacks/`, `scanner/`, `paperless/` |
+| `-v /data` | | The inputs: `stacks/`, `scanner/`, `paperless/`, `paperless-2/` |
 
 Don't run the container with `--user` or `--init`: the base image's init
 system (s6-overlay) has to start as root and as process 1. Docker mods
@@ -328,6 +329,11 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `PAPERLESS_TAGS` | — | Comma-separated tag ids to add on upload, e.g. `3,7` |
 | `PAPERLESS_TEXT_SOURCE` | `tesseract` | `mistral` replaces the document's content in Paperless with Mistral OCR's text, tables included; see [below](#paperless-ngx-input) |
 | `PAPERLESS_MAX_WAIT_MINUTES` | `30` | How long to wait for Paperless to consume a file before trying again later |
+| `PAPERLESS_2_TOKEN` | — | API token of a second Paperless user; setting it enables `paperless-2/inbox/`, whose uploads belong to that user; see [A second Paperless user](#a-second-paperless-user) |
+| `PAPERLESS_2_URL` | `PAPERLESS_URL` | Paperless URL for the second input |
+| `PAPERLESS_2_DIR` | `$DATA_DIR/paperless-2` | Root of the second input |
+| `PAPERLESS_2_TAGS` | — | Comma-separated tag ids for uploads through the second input |
+| `PAPERLESS_2_TEXT_SOURCE` | `tesseract` | As `PAPERLESS_TEXT_SOURCE`, for the second input |
 | `PAPERLESS_SHARE_TAGS` | `false` | `true` removes the owner from every tag, so all users see it; needs a superuser token; see [Shared tags](#shared-tags) |
 | `PAPERLESS_SHARE_TAGS_MINUTES` | `1` | How often the tags are checked |
 | `PAPERLESS_SHARE_TAGS_READONLY` | — | Comma-separated tag names that keep their owner and are only visible to other users, e.g. `ai-processed` |
@@ -425,7 +431,7 @@ restart. The payload holds counts only, never file names:
   several files at once.
 - `failed` counts the PDFs in the `failed/` folders.
 - `profiles` has one entry per enabled input; `paperless` appears only when
-  `PAPERLESS_URL` is set.
+  `PAPERLESS_URL` is set, `paperless-2` only when `PAPERLESS_2_TOKEN` is.
 - `paused`, `pause_reason` and `paused_since` are always present. The last
   two are `null` unless processing is paused. `pause_reason` is Mistral's
   raw error text, up to 300 characters. `paused_since` is an ISO 8601
@@ -598,6 +604,30 @@ workflows, to sort documents.
 Tested with Paperless-ngx 3.2. The task format of version 2 is supported as
 well.
 
+### A second Paperless user
+
+Paperless makes the uploading user the owner of a document. When several
+people share one Paperless instance, each should own the documents scanned
+for them; otherwise permissions that limit someone to their own documents
+don't work.
+
+Set `PAPERLESS_2_TOKEN` to the API token of a second Paperless user, and a
+second inbox, `paperless-2/inbox/`, uploads as that user. Point a second
+scanner profile, or a second network folder, at it.
+
+| Setting | Default | |
+|---|---|---|
+| `PAPERLESS_2_TOKEN` | | enables the second input |
+| `PAPERLESS_2_URL` | `PAPERLESS_URL` | set it to upload to a different instance |
+| `PAPERLESS_2_DIR` | `/data/paperless-2` | |
+| `PAPERLESS_2_TAGS` | | tag ids for this input |
+| `PAPERLESS_2_TEXT_SOURCE` | `tesseract` | as `PAPERLESS_TEXT_SOURCE` |
+
+`PAPERLESS_MAX_WAIT_MINUTES` applies to both. The second input works exactly
+like the first, with its own duplicate register in
+`work/paperless-2/uploaded.json`: the same scan may go to both users. Every
+call it makes, uploads and content replacement included, uses its own token.
+
 ### Shared tags
 
 Paperless gives every new tag an owner, the user who created it, and other
@@ -612,8 +642,9 @@ explicit permissions from every tag that has an owner. Every user with the
 global tag permissions may then see and change the tag.
 
 - The token needs permission to change other users' tags, in practice a
-  superuser's. With a weaker one, a warning is logged once, and uploads
-  carry on.
+  superuser's. With a weaker one, `tags could not be shared` is logged once
+  with HTTP 403, and uploads carry on. The same happens while Paperless is
+  unreachable.
 - `PAPERLESS_SHARE_TAGS_READONLY` takes comma-separated tag names, for
   example `ai-processed`, a marker an AI tagger uses to find work. Those tags
   keep their owner, every other user may see them, and nobody else may

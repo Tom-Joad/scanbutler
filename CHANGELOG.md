@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.3.0] - 2026-10-04
 
 ### Added
 - **Shared Paperless tags.** With `PAPERLESS_SHARE_TAGS=true`, every tag
@@ -15,6 +15,17 @@ layout, a changed webhook payload) only comes with a new major version.
   `PAPERLESS_SHARE_TAGS_READONLY` keep their owner and become visible, but
   not changeable, for everyone else. Needs a token that may change other
   users' tags.
+- **A second Paperless input.** `PAPERLESS_2_TOKEN` enables
+  `paperless-2/inbox/`, which uploads with that token, so its documents
+  belong to a second Paperless user. By default it uploads to the same
+  instance; `PAPERLESS_2_URL`, `PAPERLESS_2_DIR`, `PAPERLESS_2_TAGS` and
+  `PAPERLESS_2_TEXT_SOURCE` work as for the first input. The queue webhook
+  reports it as `paperless-2`, and `scanbutler process --profile paperless-2`
+  works.
+
+### Changed
+- A rejected Paperless token names the setting to check
+  (`PAPERLESS_TOKEN` or `PAPERLESS_2_TOKEN`).
 
 ## [1.2.0] - 2026-10-03
 

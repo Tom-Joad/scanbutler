@@ -15,7 +15,8 @@ if [[ -z ${LSIO_NON_ROOT_USER} ]]; then
     # rest there. Only those are handed over; folders that already belong to
     # someone else are left as they are.
     for dir in "${DATA_DIR:-/data}" "${STACKS_DIR:-${DATA_DIR:-/data}/stacks}" \
-               "${SCANNER_DIR:-${DATA_DIR:-/data}/scanner}" "${PAPERLESS_DIR:-${DATA_DIR:-/data}/paperless}"; do
+               "${SCANNER_DIR:-${DATA_DIR:-/data}/scanner}" "${PAPERLESS_DIR:-${DATA_DIR:-/data}/paperless}" \
+               "${PAPERLESS_2_DIR:-${DATA_DIR:-/data}/paperless-2}"; do
         if [[ -d ${dir} && $(stat -c %u "${dir}") == 0 ]]; then
             lsiown abc:abc "${dir}"
         fi

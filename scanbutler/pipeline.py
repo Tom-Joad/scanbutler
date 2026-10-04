@@ -473,7 +473,7 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
         task_id = json.loads(state.read_text(encoding="utf-8"))["task_id"]
         log.info("paperless upload resumed", extra={"source": source, "task": task_id})
     else:
-        task_id = client.upload(searchable, src.name, list(settings.paperless_tags))
+        task_id = client.upload(searchable, src.name, list(profile.paperless.tags))
         state.write_text(json.dumps({"task_id": task_id}), encoding="utf-8")
         log.info("paperless uploaded", extra={"source": source, "task": task_id})
 
