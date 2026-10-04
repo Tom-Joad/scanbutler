@@ -5,6 +5,14 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- OCR no longer fails with `Permission denied: '/root/.fonts'` on pages
+  that need a system font. The watcher, and `docker exec … scanbutler`,
+  ran as `abc` with root's home folder, which `abc` may not read; their
+  home is now `/config`.
+
 ## [1.3.0] - 2026-10-04
 
 ### Added

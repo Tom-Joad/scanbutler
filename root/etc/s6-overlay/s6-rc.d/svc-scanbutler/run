@@ -2,6 +2,9 @@
 # shellcheck shell=bash
 
 if [[ -z ${LSIO_NON_ROOT_USER} ]]; then
+    # s6-setuidgid keeps root's HOME (/root), which abc can't read: ocrmypdf
+    # then fails on Path.home() / ".fonts" when a page needs a system font.
+    export HOME=/config
     exec s6-setuidgid abc python3 -m scanbutler run
 else
     exec python3 -m scanbutler run

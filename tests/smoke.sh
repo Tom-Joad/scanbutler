@@ -113,6 +113,14 @@ USERS=$(docker exec "$NAME" ps -eo user,args | awk '/python3 -m scanbutler run/ 
 [[ -n $USERS ]] || fail "watcher not running"
 [[ $USERS != *root* ]] || fail "watcher runs as root"
 
+# abc's home must be readable by abc: ocrmypdf looks for fonts below it.
+# No `| head`: with pipefail, an early exit of head can fail the pipeline.
+PIDS=$(docker exec "$NAME" pgrep -f "python3 -m scanbutler run")
+PID=${PIDS%%$'\n'*}
+# Read as abc: root may not read another user's environ without ptrace.
+WATCHER_HOME=$(docker exec --user abc "$NAME" sh -c "tr '\\0' '\\n' < /proc/$PID/environ" | sed -n 's/^HOME=//p')
+[[ $WATCHER_HOME == /config ]] || fail "the watcher's HOME is '$WATCHER_HOME', not /config"
+
 in_log '"event":"watching inbox","profile":"paperless-2"' || fail "the second Paperless input did not start"
 for _ in $(seq 1 30); do
     in_log '"event":"tags could not be shared' && break
