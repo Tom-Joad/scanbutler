@@ -657,6 +657,12 @@ kind may then see and change it.
   keep their owner, every other user may see them, and nobody else may
   change them. A read-only tag without an owner is left alone with a
   warning: give it one in Paperless.
+- Paperless doesn't allow two ownerless objects of a kind with the same
+  name, e.g. a correspondent that you and an AI tagger both created. Such
+  an object stays as it is, and the log names it once as
+  `correspondents not shared` with its `id` and the ownerless one it clashes
+  with (`same_name_as`); all others are shared. Merge the two in Paperless,
+  and it is shared in the next round.
 - A check with nothing to do costs one list request per kind. The log says
   how many were shared, with their ids (`tags shared`,
   `correspondents shared`, `document types shared`), never their names.

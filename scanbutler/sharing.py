@@ -8,6 +8,11 @@ so this check removes the owner from every one that has one, for each kind
 switched on (PAPERLESS_SHARE_TAGS, _CORRESPONDENTS, _DOCUMENT_TYPES), every
 PAPERLESS_SHARE_TAGS_MINUTES.
 
+Paperless refuses two ownerless objects of a kind with the same name, and a
+bulk change fails as a whole (HTTP 400) if one object in it does. Then each
+object is tried on its own, so one duplicate doesn't hold up the rest; the
+ones that still fail are named once in the log, by id.
+
 Tags listed in PAPERLESS_SHARE_TAGS_READONLY are protected instead: they
 keep their owner, and every other user may see them, but not change them.
 A tagger's work-queue marker should not be renamed or deleted by accident.
@@ -48,6 +53,8 @@ class Sharer:
         self.interval = interval_seconds
         # kind -> the last error, so a lasting one is logged once, not every minute
         self._last_error: dict[str, str] = {}
+        # (kind, id) of objects that could not be shared on their own, logged once
+        self._stuck: set[tuple[str, int]] = set()
         self._ownerless_warned: set[int] = set()
 
     def check_once(self, kind: str) -> None:
@@ -56,11 +63,43 @@ class Sharer:
         protected = [o for o in objects if o["name"].casefold() in readonly]
         owned = [o for o in objects if o["name"].casefold() not in readonly and o.get("owner") is not None]
         if owned:
-            self.client.set_permissions(kind, [o["id"] for o in owned], owner=None)
-            # Ids, not names: names come from the documents.
-            log.info(f"{_label(kind)} shared", extra={"count": len(owned), "ids": sorted(o["id"] for o in owned)})
+            try:
+                self.client.set_permissions(kind, [o["id"] for o in owned], owner=None)
+                shared = owned
+            except PaperlessError:
+                # One object in the batch Paperless won't take, e.g. a
+                # duplicate name: the whole call fails. Go one by one.
+                shared = self._one_by_one(kind, owned, objects)
+            if shared:
+                # Ids, not names: names come from the documents.
+                log.info(f"{_label(kind)} shared", extra={"count": len(shared), "ids": sorted(o["id"] for o in shared)})
         if protected:
             self._protect(protected)
+
+    def _one_by_one(self, kind: str, owned: list[dict], objects: list[dict]) -> list[dict]:
+        ownerless = {o["name"].casefold().strip(): o["id"] for o in objects if o.get("owner") is None}
+        shared = []
+        for obj in owned:
+            try:
+                self.client.set_permissions(kind, [obj["id"]], owner=None)
+            except PaperlessError as exc:
+                if (kind, obj["id"]) not in self._stuck:
+                    self._stuck.add((kind, obj["id"]))
+                    same_name = ownerless.get(obj["name"].casefold().strip())
+                    log.warning(
+                        f"{_label(kind)} not shared",
+                        extra={
+                            "id": obj["id"],
+                            # The usual reason; merge the two in Paperless.
+                            "same_name_as": same_name,
+                            "error": str(exc)[:300],
+                        },
+                    )
+                continue
+            ownerless[obj["name"].casefold().strip()] = obj["id"]
+            self._stuck.discard((kind, obj["id"]))
+            shared.append(obj)
+        return shared
 
     def _protect(self, tags: list[dict]) -> None:
         users = self.client.user_ids()

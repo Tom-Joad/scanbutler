@@ -5,6 +5,15 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- One object Paperless won't make ownerless, usually because an ownerless
+  one with the same name exists, no longer stops the whole kind from being
+  shared (`HTTP 400: Error performing bulk permissions edit`). The others
+  are shared one by one, and the clashing one is logged once as
+  `… not shared`, with its `id` and `same_name_as`.
+
 ## [1.5.0] - 2026-10-04
 
 ### Added

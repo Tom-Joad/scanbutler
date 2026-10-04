@@ -42,6 +42,12 @@ class FakeApi:
         more = page * self.page_size < len(items)
         return httpx.Response(200, json={"count": len(items), "next": "next" if more else None, "results": chunk})
 
+    def _would_duplicate(self, kind, ids):
+        store = self.store[kind]
+        names = [o["name"].casefold() for i, o in store.items() if o["owner"] is None and i not in ids]
+        names += [store[i]["name"].casefold() for i in ids]
+        return len(names) != len(set(names))
+
     def __call__(self, request: httpx.Request) -> httpx.Response:
         kind = request.url.path.strip("/").removeprefix("api/")
         if kind in self.store:
@@ -53,8 +59,11 @@ class FakeApi:
             body = json.loads(request.content)
             if body["object_type"] in self.forbidden:
                 return httpx.Response(403, json={"detail": "Insufficient permissions"})
-            self.posts.append(body)
             assert body["operation"] == "set_permissions" and body["merge"] is False
+            if body["owner"] is None and self._would_duplicate(body["object_type"], body["objects"]):
+                # Like Paperless: unique (name, owner), checked for the whole call.
+                return httpx.Response(400, text="Error performing bulk permissions edit, check logs for more detail.")
+            self.posts.append(body)
             for object_id in body["objects"]:
                 self.store[body["object_type"]][object_id].update(owner=body["owner"], permissions=body["permissions"])
             return httpx.Response(200, json={"result": "OK"})
@@ -198,3 +207,41 @@ def test_share_config(settings, monkeypatch):
     monkeypatch.setenv("PAPERLESS_SHARE_DOCUMENT_TYPES", "true")
     monkeypatch.setenv("PAPERLESS_SHARE_CORRESPONDENTS", "yes")
     assert Settings.from_env().paperless_share_kinds == ("tags", "correspondents", "document_types")
+
+
+def test_a_duplicate_name_does_not_hold_up_the_others(caplog):
+    api = FakeApi(
+        correspondents=[obj(1, "Bank", None), obj(2, "bank", TAGGER), obj(3, "Doctor", ADMIN), obj(4, "Employer", TAGGER)]
+    )
+    sharer = sharer_for(api, kinds=("correspondents",))
+
+    with caplog.at_level(logging.INFO):
+        sharer.check_all()
+        sharer.check_all()  # the duplicate is still there: no second warning
+
+    store = api.store["correspondents"]
+    assert store[3]["owner"] is None and store[4]["owner"] is None
+    assert store[2]["owner"] == TAGGER  # left as it was
+    stuck = [r for r in caplog.records if r.message == "correspondents not shared"]
+    assert len(stuck) == 1 and stuck[0].id == 2 and stuck[0].same_name_as == 1
+    shared = next(r for r in caplog.records if r.message == "correspondents shared")
+    assert shared.ids == [3, 4]
+    assert "Bank" not in caplog.text and "bank" not in str(vars(stuck[0]))
+
+
+def test_two_owned_objects_with_one_name_share_the_first():
+    api = FakeApi(document_types=[obj(1, "Invoice", ADMIN), obj(2, "Invoice", TAGGER)])
+    sharer_for(api, kinds=("document_types",)).check_all()
+    owners = [o["owner"] for o in api.store["document_types"].values()]
+    assert owners == [None, TAGGER]
+
+
+def test_a_merged_duplicate_is_shared_in_the_next_round(caplog):
+    api = FakeApi([tag(1, "Health", None), tag(2, "Health", TAGGER), tag(3, "Car", ADMIN)])
+    sharer = sharer_for(api)
+    sharer.check_all()
+    del api.store["tags"][1]  # merged by hand in Paperless
+    with caplog.at_level(logging.INFO):
+        sharer.check_all()
+    assert api.tags[2]["owner"] is None
+    assert next(r for r in caplog.records if r.message == "tags shared").ids == [2]
