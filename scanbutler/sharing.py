@@ -44,7 +44,8 @@ class TagSharer:
         owned = [t for t in tags if t["name"].casefold() not in self.readonly and t.get("owner") is not None]
         if owned:
             self.client.set_tag_permissions([t["id"] for t in owned], owner=None)
-            log.info("tags shared", extra={"tags": sorted(t["name"] for t in owned)})
+            # Ids, not names: tag names come from the documents.
+            log.info("tags shared", extra={"count": len(owned), "ids": sorted(t["id"] for t in owned)})
         if protected:
             self._protect(protected)
 
@@ -59,19 +60,19 @@ class TagSharer:
                     self._ownerless_warned.add(tag["id"])
                     log.warning(
                         "read-only tag has no owner, so every user may change it; give it an owner in Paperless",
-                        extra={"tag": tag["name"]},
+                        extra={"tag_id": tag["id"]},
                     )
                 continue
             viewers = sorted(user for user in users if user != owner)
             if _users(tag, "view") == viewers and not _users(tag, "change") and not _groups(tag):
                 continue
             self.client.set_tag_permissions([tag["id"]], owner=owner, view_users=viewers)
-            log.info("tag made read-only for other users", extra={"tag": tag["name"], "users": len(viewers)})
+            log.info("tag made read-only for other users", extra={"tag_id": tag["id"], "users": len(viewers)})
 
     def run(self, stop: threading.Event) -> None:
         log.info(
             "sharing paperless tags",
-            extra={"interval_s": self.interval, "read_only": sorted(self.readonly)},
+            extra={"interval_s": self.interval, "read_only_tags": len(self.readonly)},
         )
         while not stop.is_set():
             try:

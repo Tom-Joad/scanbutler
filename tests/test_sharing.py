@@ -70,6 +70,15 @@ def test_owned_tags_lose_their_owner_on_every_page():
     assert len(api.posts) == 1 and sorted(api.posts[0]["objects"]) == [1, 2, 4]  # one call, the unowned one untouched
 
 
+def test_the_log_carries_ids_not_tag_names(caplog):
+    api = FakeApi([tag(1, "Blood count", ADMIN)])
+    with caplog.at_level(logging.INFO):
+        sharer_for(api).check_once()
+    record = next(r for r in caplog.records if r.message == "tags shared")
+    assert record.ids == [1] and record.count == 1
+    assert "Blood count" not in caplog.text and not any("Blood count" in str(vars(r)) for r in caplog.records)
+
+
 def test_nothing_to_do_means_no_write():
     api = FakeApi([tag(1, "Invoice", None), tag(2, "Health", None)])
     sharer_for(api).check_once()

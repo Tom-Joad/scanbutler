@@ -328,6 +328,9 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `PAPERLESS_TAGS` | — | Comma-separated tag ids to add on upload, e.g. `3,7` |
 | `PAPERLESS_TEXT_SOURCE` | `tesseract` | `mistral` replaces the document's content in Paperless with Mistral OCR's text, tables included; see [below](#paperless-ngx-input) |
 | `PAPERLESS_MAX_WAIT_MINUTES` | `30` | How long to wait for Paperless to consume a file before trying again later |
+| `PAPERLESS_SHARE_TAGS` | `false` | `true` removes the owner from every tag, so all users see it; needs a superuser token; see [Shared tags](#shared-tags) |
+| `PAPERLESS_SHARE_TAGS_MINUTES` | `1` | How often the tags are checked |
+| `PAPERLESS_SHARE_TAGS_READONLY` | — | Comma-separated tag names that keep their owner and are only visible to other users, e.g. `ai-processed` |
 
 **Naming**
 
@@ -617,7 +620,8 @@ global tag permissions may then see and change the tag.
   change them. A read-only tag without an owner is left alone with a
   warning: give it one in Paperless.
 - A check with nothing to do costs one request for the tag list. The log
-  names every tag that was shared (`tags shared`).
+  says how many tags were shared, with their ids (`tags shared`), never
+  their names.
 - This works on tags only. Correspondents and document types keep their
   owners.
 

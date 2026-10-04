@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [1.3.0] - 2026-10-04
+## [Unreleased]
 
 ### Added
 - **Shared Paperless tags.** With `PAPERLESS_SHARE_TAGS=true`, every tag
