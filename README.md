@@ -381,7 +381,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `QUEUE_WEBHOOK_URL` | — | Report queue counts here, see [below](#queue-webhook-home-assistant) |
 | `QUEUE_WEBHOOK_CHECK_SECONDS` | `10` | How often the queue is counted |
 | `QUEUE_WEBHOOK_HEARTBEAT_SECONDS` | `300` | Resend interval without changes |
-| `LOG_LEVEL` | `INFO` | Logs are JSON lines on stdout |
+| `LOG_LEVEL` | `INFO` | Logs are JSON lines on stdout. Every line logged while a file is being worked on names it in `source` (folder and name below the inbox) |
 
 ## Languages
 

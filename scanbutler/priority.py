@@ -2,13 +2,14 @@
 
 A worker marks the file it processes; the OCR job budget and the Mistral
 request throttle read the mark. Thread pools don't carry it over by
-themselves, so their tasks are wrapped with `keep`.
+themselves, so their tasks are wrapped with `keep`, which carries the whole
+context: the mark, and the file name the log lines are tagged with.
 """
 
 from __future__ import annotations
 
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, copy_context
 from typing import Callable, TypeVar
 
 T = TypeVar("T")
@@ -30,11 +31,11 @@ def marked(priority: bool):
 
 
 def keep(fn: Callable[..., T]) -> Callable[..., T]:
-    """`fn` for a thread pool, running with the caller's priority."""
-    priority = current()
+    """`fn` for a thread pool, running in the caller's context (priority, log source)."""
+    context = copy_context()
 
     def run(*args, **kwargs) -> T:
-        with marked(priority):
-            return fn(*args, **kwargs)
+        # One copy per call: a context can't be entered by two threads at once.
+        return context.copy().run(fn, *args, **kwargs)
 
     return run
