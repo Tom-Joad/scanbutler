@@ -186,7 +186,7 @@ def test_reporter_counts_several_files_in_progress(settings):
     reporter = QueueReporter("http://ha.test/hook", settings.profiles)
     reporter.set_processing("scanner", True)
     reporter.set_processing("scanner", True)
-    assert reporter.snapshot()["profiles"]["scanner"] == {"waiting": 1, "processing": 2, "failed": 0}
+    assert reporter.snapshot()["profiles"]["scanner"] == {"waiting": 1, "processing": 2, "failed": 0, "duplicates": 0}
     reporter.set_processing("scanner", False)
     assert reporter.snapshot()["profiles"]["scanner"]["processing"] == 1
 

@@ -28,6 +28,8 @@ def test_reports_counts_on_change_and_heartbeat_only(settings):
     (scanner.inbox / ".partial.pdf").write_bytes(b"")  # hidden: not counted
     (scanner.failed / "bad.pdf").write_bytes(b"x")
     (scanner.failed / "bad.pdf.error.txt").write_text("x")
+    (scanner.duplicates / "2026").mkdir(parents=True)
+    (scanner.duplicates / "2026" / "again.pdf").write_bytes(b"x")  # counted apart from failed
     reporter, client, sent = make(settings, lambda: httpx.Response(200))
     reporter.set_processing("stacks", True)
 
@@ -37,12 +39,13 @@ def test_reports_counts_on_change_and_heartbeat_only(settings):
         "waiting": 2,
         "processing": 1,
         "failed": 1,
+        "duplicates": 1,
         "paused": False,
         "pause_reason": None,
         "paused_since": None,
         "profiles": {
-            "stacks": {"waiting": 1, "processing": 1, "failed": 0},
-            "scanner": {"waiting": 1, "processing": 0, "failed": 1},
+            "stacks": {"waiting": 1, "processing": 1, "failed": 0, "duplicates": 0},
+            "scanner": {"waiting": 1, "processing": 0, "failed": 1, "duplicates": 1},
         },
     }
     assert "stack-01" not in json.dumps(sent)  # counts only, never file names

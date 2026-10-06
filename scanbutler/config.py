@@ -193,6 +193,11 @@ class Profile:
     def failed(self) -> Path:
         return self.root / "failed"
 
+    @property
+    def duplicates(self) -> Path:
+        """Files Paperless already has. Kept apart from failed/: nothing to fix there."""
+        return self.failed / "duplicates"
+
 
 @dataclass(frozen=True)
 class Settings:

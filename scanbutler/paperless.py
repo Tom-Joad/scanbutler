@@ -8,6 +8,7 @@ a duplicate). Only a confirmed document counts as done.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,32 @@ log = logging.getLogger(__name__)
 
 class PaperlessError(RuntimeError):
     """Paperless rejected the document; retrying the same file won't help."""
+
+
+class DuplicateFile(PaperlessError):
+    """The file is already in Paperless: in our upload ledger, or Paperless said so.
+
+    `checked_before_upload` is true when the ledger caught it, before any OCR
+    or upload took place.
+    """
+
+    def __init__(self, message: str, document: int | None, checked_before_upload: bool) -> None:
+        super().__init__(message)
+        self.document = document
+        self.checked_before_upload = checked_before_upload
+
+
+_DUPLICATE = re.compile(r"\bduplicate\b", re.IGNORECASE)
+_DOCUMENT_ID = re.compile(r"\(#(\d+)\)")
+
+
+def duplicate_of(message: str) -> int | None | bool:
+    """For a task message about a duplicate: the existing document's id (None if
+    Paperless didn't name one); False for any other message."""
+    if not _DUPLICATE.search(message):
+        return False
+    found = _DOCUMENT_ID.search(message)
+    return int(found.group(1)) if found else None
 
 
 class PaperlessUnavailable(RuntimeError):

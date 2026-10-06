@@ -153,6 +153,9 @@ paperless/  inbox/          archive/  failed/    (only with PAPERLESS_URL set)
 paperless-2/ inbox/         archive/  failed/    (only with PAPERLESS_2_TOKEN set)
 ```
 
+The Paperless inputs put files that Paperless already has into
+`failed/duplicates/`, apart from real failures.
+
 Its own data (plans, caches, review files) goes to `CONFIG_PATH`, mounted
 at `/config`.
 
@@ -419,11 +422,11 @@ restart. The payload holds counts only, never file names:
 
 ```json
 {
-  "queued": 3, "waiting": 2, "processing": 1, "failed": 0,
+  "queued": 3, "waiting": 2, "processing": 1, "failed": 0, "duplicates": 0,
   "paused": false, "pause_reason": null, "paused_since": null,
   "profiles": {
-    "stacks":  {"waiting": 1, "processing": 1, "failed": 0},
-    "scanner": {"waiting": 1, "processing": 0, "failed": 0}
+    "stacks":  {"waiting": 1, "processing": 1, "failed": 0, "duplicates": 0},
+    "scanner": {"waiting": 1, "processing": 0, "failed": 0, "duplicates": 0}
   }
 }
 ```
@@ -431,7 +434,9 @@ restart. The payload holds counts only, never file names:
 - `queued` is `waiting + processing`.
 - `processing` can be more than 1: the scanner and Paperless inputs work on
   several files at once.
-- `failed` counts the PDFs in the `failed/` folders.
+- `failed` counts the PDFs in the `failed/` folders, without duplicates.
+- `duplicates` counts the PDFs in `failed/duplicates/`: files Paperless
+  already has. Only the Paperless inputs put files there.
 - `profiles` has one entry per enabled input; `paperless` appears only when
   `PAPERLESS_URL` is set, `paperless-2` only when `PAPERLESS_2_TOKEN` is.
 - `paused`, `pause_reason` and `paused_since` are always present. The last
@@ -466,6 +471,10 @@ template:
       - name: Scan-Splitter failed
         unique_id: scan_splitter_failed
         state: "{{ trigger.json.failed }}"
+        unit_of_measurement: files
+      - name: Scan-Splitter duplicates
+        unique_id: scan_splitter_duplicates
+        state: "{{ trigger.json.duplicates | default(0) }}"
         unit_of_measurement: files
     binary_sensor:
       - name: Scan-Splitter paused
@@ -586,14 +595,19 @@ Failure handling:
 - **Paperless unreachable, or token rejected.** The file stays in the inbox,
   and the input retries after 5 minutes. A file that is still being consumed
   is not uploaded a second time after a restart: the task id is stored.
-- **Paperless rejects the document**, for example as a duplicate. The file
-  moves to `failed/` with Paperless's message in the `.error.txt`.
-- **The same original dropped in twice.** The file moves to `failed/` and
-  names the Paperless document it already became. Paperless's own duplicate
-  check cannot catch this, because the text layer makes every upload a
-  slightly different file. The container therefore keeps a register of
-  uploaded originals in `work/paperless/uploaded.json`. Remove an entry there
-  to upload that file again.
+- **Paperless rejects the document.** The file moves to `failed/` with
+  Paperless's message in the `.error.txt`.
+- **Duplicates** move to `failed/duplicates/`, without an `.error.txt`: there
+  is nothing to fix. The log line `duplicate` names the Paperless document
+  that already exists (`document`) and who noticed (`found_by`):
+  - `ledger`: the same original was dropped in twice. Paperless's own
+    duplicate check cannot catch this, because the text layer makes every
+    upload a slightly different file. The container therefore keeps a
+    register of uploaded originals in `/config/<input>/uploaded.json`, and
+    checks it before any OCR or upload, so such a file costs nothing. Remove
+    an entry there to upload that file again.
+  - `paperless`: Paperless rejected the upload as a duplicate of an existing
+    document.
 
 Paperless decides by itself whether to run its own OCR. With the default
 `PAPERLESS_OCR_MODE=auto`, it keeps the text layer added here. With `redo`
@@ -627,7 +641,7 @@ scanner profile, or a second network folder, at it.
 
 `PAPERLESS_MAX_WAIT_MINUTES` applies to both. The second input works exactly
 like the first, with its own duplicate register in
-`work/paperless-2/uploaded.json`: the same scan may go to both users. Every
+`/config/paperless-2/uploaded.json`: the same scan may go to both users. Every
 call it makes, uploads and content replacement included, uses its own token.
 
 ### Shared tags, correspondents and document types
