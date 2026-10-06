@@ -71,14 +71,31 @@ def test_upload_success_archives_and_cleans_up(paperless_settings):
 
 
 def test_rejected_document_goes_to_failed(paperless_settings):
-    client = FakePaperless(outcome="FAILURE", result="Not consuming scan.pdf: It is a duplicate of invoice (#12).")
+    client = FakePaperless(outcome="FAILURE", result="Not consuming scan.pdf: file type not supported")
     watcher, profile, _ = watcher_for(paperless_settings, client)
     make_pdf(profile.inbox / "scan.pdf", 1)
 
     watcher.poll_once()
 
     error = (profile.failed / "scan.pdf.error.txt").read_text(encoding="utf-8")
-    assert "duplicate" in error
+    assert "not supported" in error
+    assert not profile.duplicates.exists()
+
+
+def test_duplicate_rejected_by_paperless_goes_to_duplicates(paperless_settings, caplog):
+    client = FakePaperless(outcome="FAILURE", result="Not consuming scan.pdf: It is a duplicate of Invoice ACME (#12).")
+    watcher, profile, _ = watcher_for(paperless_settings, client)
+    (profile.inbox / "2026").mkdir(parents=True)
+    make_pdf(profile.inbox / "2026" / "scan.pdf", 1)
+    caplog.set_level("INFO", logger="scanbutler.watcher")
+
+    watcher.poll_once()
+
+    assert (profile.duplicates / "2026" / "scan.pdf").exists()  # inbox sub-folders are mirrored
+    assert not list(profile.failed.rglob("*.error.txt"))  # nothing to read
+    record = next(r for r in caplog.records if r.getMessage() == "duplicate")
+    assert (record.document, record.found_by) == (12, "paperless")
+    assert "ACME" not in caplog.text  # the existing document's title stays out of the log
 
 
 def test_unreachable_paperless_keeps_files_and_backs_off(paperless_settings):
@@ -214,8 +231,17 @@ def test_same_original_dropped_twice_is_not_uploaded_again(paperless_settings):
     watcher.poll_once()
 
     assert len(client.uploads) == 1
-    error = (profile.failed / "scan-again.pdf.error.txt").read_text(encoding="utf-8")
-    assert "already uploaded as Paperless document 42" in error
+    assert (profile.duplicates / "scan-again.pdf").exists()
+    assert not list(profile.failed.rglob("*.error.txt"))
+
+
+def test_duplicate_messages_name_the_existing_document():
+    from scanbutler.paperless import duplicate_of
+
+    assert duplicate_of("Not consuming a.pdf: It is a duplicate of Invoice (#12).") == 12
+    assert duplicate_of("a.pdf: It is a duplicate of Invoice (#7). Note: existing document is in the trash.") == 7
+    assert duplicate_of("Duplicate file") is None  # a duplicate, but no id given
+    assert duplicate_of("Not consuming a.pdf: file type not supported") is False
 
 
 TABLE = "| Test | Value | Unit |\n|---|---|---|\n| Leukocytes | 6.2 | /nl |"

@@ -25,7 +25,7 @@ from .pdfops import looks_complete
 from .naming import unique_path
 from .notify import QueueReporter
 from .pause import PauseGate, limit_error_in
-from .paperless import PaperlessClient, PaperlessUnavailable, client_for
+from .paperless import DuplicateFile, PaperlessClient, PaperlessUnavailable, client_for
 from .pipeline import AlreadyInProgress, process_for_paperless, process_stack
 from .sharing import Sharer
 
@@ -164,6 +164,22 @@ class InboxWatcher:
             # Next round it is either a known duplicate or, if the other upload failed, uploaded.
             log.info("identical file in progress, trying later", extra={"source": (folder / path.name).as_posix()})
             return
+        except DuplicateFile as exc:
+            # Nothing to fix and nothing to read: no error file, no traceback.
+            if exc.checked_before_upload:
+                self.gate.skip_probe()  # Mistral was never asked
+            elif self.profile.uses_mistral:
+                self.gate.done()
+            self._move(path, self.profile.duplicates, folder)
+            log.info(
+                "duplicate",
+                extra={
+                    "profile": self.profile.name,
+                    "source": (folder / path.name).as_posix(),
+                    "document": exc.document,
+                    "found_by": "ledger" if exc.checked_before_upload else "paperless",
+                },
+            )
         except PaperlessUnavailable as exc:
             # Not this file's fault: keep it in the inbox and try again later.
             self._retry_after = time.monotonic() + PAPERLESS_RETRY_SECONDS

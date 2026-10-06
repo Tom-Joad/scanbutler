@@ -91,8 +91,9 @@ token that has the `read:packages` scope.
   about $1 per 500 pages, and each file waits about a minute for the batch
   job.
 - If Paperless is down, files wait in the inbox and are retried every 5
-  minutes. A file that was already uploaded once is not uploaded again; it
-  moves to `failed/` with the Paperless document number.
+  minutes. A file that Paperless already has is not uploaded again; it
+  moves to `failed/duplicates/`, and the log line `duplicate` names the
+  Paperless document.
 - For a second Paperless user, set `PAPERLESS_2_TOKEN` and the *Paperless 2*
   path in the advanced view. Files there are uploaded as that user and
   belong to them. See *A second Paperless user* in the project README.

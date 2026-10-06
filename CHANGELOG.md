@@ -5,6 +5,22 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Added
+- **Duplicates get their own folder.** Files the Paperless inputs don't
+  upload because Paperless already has them move to `failed/duplicates/`
+  instead of `failed/`, without an `.error.txt` and without a traceback in
+  the log. The log line `duplicate` names the existing Paperless document
+  (`document`) and whether the upload register or Paperless itself noticed
+  (`found_by`: `ledger` or `paperless`). `failed/` keeps only real failures.
+- The queue webhook reports `duplicates`, in total and per input. `failed`
+  no longer counts them.
+
+To sort duplicates that are already in `failed/`, move the PDFs back into
+the input's `inbox/` and delete their `.error.txt`. Files in the upload
+register are recognised before any OCR or upload, so this costs nothing.
+
 ## [1.5.1] - 2026-10-04
 
 ### Fixed

@@ -23,7 +23,7 @@ from .pause import PauseGate
 log = logging.getLogger(__name__)
 
 
-def count_pdfs(directory) -> int:
+def count_pdfs(directory, exclude=None) -> int:
     try:
         return sum(
             1
@@ -31,6 +31,7 @@ def count_pdfs(directory) -> int:
             if p.is_file()
             and p.suffix.lower() == ".pdf"
             and not any(part.startswith(".") for part in p.relative_to(directory).parts)
+            and not (exclude is not None and p.is_relative_to(exclude))
         )
     except OSError:
         # The share can be away for a moment; a missing count is better than a crash.
@@ -86,9 +87,11 @@ class QueueReporter:
             per_profile[profile.name] = {
                 "waiting": in_inbox - processing,
                 "processing": processing,
-                "failed": count_pdfs(profile.failed),
+                "failed": count_pdfs(profile.failed, exclude=profile.duplicates),
+                "duplicates": count_pdfs(profile.duplicates),
             }
-        totals = {key: sum(p[key] for p in per_profile.values()) for key in ("waiting", "processing", "failed")}
+        keys = ("waiting", "processing", "failed", "duplicates")
+        totals = {key: sum(p[key] for p in per_profile.values()) for key in keys}
         pause = self.gate.status() if self.gate else {"paused": False, "pause_reason": None, "paused_since": None}
         return {"queued": totals["waiting"] + totals["processing"], **totals, **pause, "profiles": per_profile}
 
@@ -121,6 +124,7 @@ class QueueReporter:
                 "waiting": state["waiting"],
                 "processing": state["processing"],
                 "failed": state["failed"],
+                "duplicates": state["duplicates"],
                 "paused": state["paused"],
             },
         )

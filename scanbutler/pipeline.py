@@ -23,7 +23,7 @@ from .config import Profile, Settings
 from .naming import build_stem, unique_path
 from .llm_cache import CachedChat
 from .ocr import BatchOptions, Page, run_ocr
-from .paperless import PaperlessError, PaperlessUnavailable, task_document_id, task_message, task_status
+from .paperless import DuplicateFile, PaperlessError, PaperlessUnavailable, duplicate_of, task_document_id, task_message, task_status
 from .plan import Plan, PlannedDocument, format_pages, parse_pages
 
 log = logging.getLogger(__name__)
@@ -418,9 +418,11 @@ def process_for_paperless(
             # Paperless's own duplicate check compares the uploaded file, and
             # ocrmypdf writes a slightly different PDF every run, so it can't
             # catch a scan that is dropped in twice. This check compares originals.
-            raise PaperlessError(
+            raise DuplicateFile(
                 f"this exact file was already uploaded as Paperless document {uploaded[digest]['document']} "
-                f"on {uploaded[digest]['date']}; remove its entry from {LEDGER} to upload it again"
+                f"on {uploaded[digest]['date']}; remove its entry from {LEDGER} to upload it again",
+                document=uploaded[digest]["document"],
+                checked_before_upload=True,
             )
         if digest in _UPLOADING:
             raise AlreadyInProgress("an identical file is being uploaded right now")
@@ -485,7 +487,13 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
     if task_status(task) != "SUCCESS":
         # A later retry (e.g. after deleting a duplicate) must upload again.
         state.unlink(missing_ok=True)
-        raise PaperlessError(f"Paperless did not consume the file: {task_message(task)}")
+        message = task_message(task)
+        existing = duplicate_of(message)
+        if existing is not False:
+            raise DuplicateFile(
+                "Paperless rejected it as a duplicate", document=existing, checked_before_upload=False
+            )
+        raise PaperlessError(f"Paperless did not consume the file: {message}")
 
     document = task_document_id(task)
     log.info("paperless document created", extra={"source": source, "document": document})
