@@ -1,3 +1,3 @@
 """Split scanned PDF stacks into individual, named, searchable documents."""
 
-__version__ = "1.5.1"
+__version__ = "1.6.0"
