@@ -5,6 +5,13 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.6.1] - 2026-10-12
+
+### Changed
+- The image is built on the current `baseimage-debian` (trixie) release,
+  with the latest Debian package updates.
+- `pypdfium2` 5.14.0 (was 5.13.0).
+
 ## [1.6.0] - 2026-10-06
 
 ### Added
