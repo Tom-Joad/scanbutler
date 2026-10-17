@@ -5,6 +5,13 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.6.2] - 2026-10-17
+
+### Changed
+- The image is built on the current `baseimage-debian` (trixie) release,
+  with the latest Debian package updates.
+- `pikepdf` 10.17.0 (was 10.16.0).
+
 ## [1.6.1] - 2026-10-12
 
 ### Changed
@@ -422,6 +429,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.6.2]: https://github.com/Tom-Joad/scanbutler/compare/v1.6.1...v1.6.2
 [1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v1.0.0
