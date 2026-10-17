@@ -8,6 +8,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/Tom-Joad/scanbutler</Support>
   <Project>https://github.com/Tom-Joad/scanbutler</Project>
+  <Icon>https://raw.githubusercontent.com/Tom-Joad/unraid-templates/main/icons/scanbutler.png</Icon>
   <TemplateURL>https://raw.githubusercontent.com/Tom-Joad/scanbutler/main/unraid/scanbutler.xml</TemplateURL>
   <Overview>
     Turns scanned paper into searchable PDFs, one per document, named by topic and date. The
