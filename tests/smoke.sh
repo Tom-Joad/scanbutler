@@ -74,6 +74,16 @@ done
 in_log 'configuration error: MISTRAL_API_KEY' || fail "no configuration error without MISTRAL_API_KEY"
 docker rm -f "$NAME" >/dev/null
 
+echo "== OCR only: no key needed with the stacks off and SCANNER_NAMING=off"
+docker run -d --name "$NAME" -e STACKS_ENABLED=false -e SCANNER_NAMING=off "$IMAGE" >/dev/null
+for _ in $(seq 1 60); do
+    in_log '"event":"starting"' && break
+    sleep 1
+done
+in_log '"event":"starting"' || fail "no start without a key in OCR-only mode"
+if in_log 'configuration error'; then fail "configuration error in OCR-only mode"; fi
+docker rm -f "$NAME" >/dev/null
+
 echo "== a misspelt language is a configuration error"
 docker run -d --name "$NAME" -e MISTRAL_API_KEY="$SECRET" -e OCRMYPDF_LANGUAGES=deu+ger "$IMAGE" >/dev/null
 for _ in $(seq 1 30); do

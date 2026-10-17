@@ -19,7 +19,7 @@ interface; everything it does shows up in the container log.
    | Paperless | optional, e.g. `/mnt/user/<share>/scan-splitter/paperless` |
    | Config | `/mnt/user/appdata/scanbutler` |
    | `PUID`, `PGID` | `99`, `100` (nobody:users, like Unraid's shares) |
-   | `MISTRAL_API_KEY` | your key (masked in the UI) |
+   | `MISTRAL_API_KEY` | your key (masked in the UI); not needed for OCR only (stacks off, `SCANNER_NAMING=off`) |
    | `MISTRAL_LLM_MODEL` | `mistral-large-latest`, or a pinned version such as `mistral-large-2512` |
    | `MISTRAL_MAX_RPS` | a little below your account's requests-per-second limit for that model |
    | `TITLE_LANGUAGE` | e.g. `English`; leave empty to use each document's language |

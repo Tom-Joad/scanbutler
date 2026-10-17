@@ -197,11 +197,38 @@ def build_plan(
     )
 
 
+def keep_name_plan(
+    pages: list[Page], settings: Settings, source: str, digest: str, folder: PurePosixPath, stem: str
+) -> Plan:
+    """One document under the input's own name; no model is asked.
+
+    Blank pages are dropped as with naming on (DROP_BLANK_PAGES), detected
+    by their ink, since the Tesseract text says nothing about photos.
+    """
+    blank = [p for p in pages if p.is_blank(settings.blank_max_chars, settings.blank_max_ink)]
+    blank_indices = {p.index for p in blank}
+    keep = [p for p in pages if p.index not in blank_indices] if settings.drop_blank_pages else pages
+    if not keep:
+        raise RuntimeError("every page of the scan is blank")
+    log.info("blank pages detected", extra={"blank": len(blank), "content": len(pages) - len(blank)})
+    return Plan(
+        source=source,
+        source_sha256=digest,
+        page_count=len(pages),
+        folder=str(folder),
+        documents=[PlannedDocument(pages=format_pages([p.index for p in keep]), title=stem, date=None)],
+        dropped_pages=format_pages([p.index for p in blank]) if settings.drop_blank_pages else "",
+        keep_name=True,
+    )
+
+
 def _retitle(plan: Plan, work: Path, settings: Settings, backend) -> None:
     """Re-generate title/date for documents whose title was cleared by hand."""
     missing = [doc for doc in plan.documents if not doc.title.strip()]
     if not missing:
         return
+    if plan.keep_name:
+        raise RuntimeError("this file keeps its name (SCANNER_NAMING=off); set the title in plan.json by hand")
     if backend is None:
         raise RuntimeError("documents without a title need the Mistral API, but no API key is configured")
     # Mistral OCR chunks are cached already, so this costs no OCR calls.
@@ -241,7 +268,10 @@ def _write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
 
     written: list[Path] = []
     for doc, indices in zip(plan.documents, page_lists):
-        stem = build_stem(settings.filename_pattern, doc.title, doc.date, settings.no_date_label)
+        if plan.keep_name:
+            stem = doc.title
+        else:
+            stem = build_stem(settings.filename_pattern, doc.title, doc.date, settings.no_date_label)
         target = unique_path(out_dir, stem, taken=set(written))
         pdfops.write_document(work / SEARCHABLE, indices, target, doc.title or stem, doc.summary)
         written.append(target)
@@ -351,6 +381,11 @@ def _process_stack(
     if plan_path.exists():
         plan = Plan.load(plan_path)
         log.info("existing plan reused", extra={"source": source})
+    elif not profile.naming:
+        plan = keep_name_plan(pages, settings, source, digest, folder, src.stem)
+        plan.profile = profile.name
+        plan.text_source = profile.text_source
+        plan.save(plan_path)
     else:
         chat = CachedChat(backend, work / LLM_CACHE)
         plan = build_plan(pages, settings, chat, source, digest, folder, work / DECISIONS, split=profile.split)
