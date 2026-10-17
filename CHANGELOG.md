@@ -5,6 +5,19 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Added
+- `SCANNER_NAMING=off`: scanner files keep their file name and sub-folder
+  and only get the Tesseract text layer, without Mistral OCR or a chat
+  model. Blank pages are still dropped (`DROP_BLANK_PAGES`).
+
+### Changed
+- `MISTRAL_API_KEY` is only required when an enabled input calls Mistral:
+  the stacks, a scanner that names files, or a Paperless input with
+  `TEXT_SOURCE=mistral`. With the stacks off and `SCANNER_NAMING=off`, the
+  container runs without a key; the error names the inputs that need it.
+
 ## [1.6.2] - 2026-10-17
 
 ### Changed

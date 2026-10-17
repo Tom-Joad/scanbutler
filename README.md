@@ -297,7 +297,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MISTRAL_API_KEY` | — | Required |
+| `MISTRAL_API_KEY` | — | Required by inputs that call Mistral: stacks always, the scanner when it names files, a Paperless input with `TEXT_SOURCE=mistral`. See [OCR only, without Mistral](#ocr-only-without-mistral) |
 | `MISTRAL_LLM_MODEL` | `mistral-large-latest` | Model for splitting and naming |
 | `MISTRAL_OCR_MODEL` | `mistral-ocr-latest` | OCR model |
 | `MISTRAL_MAX_RPS` | `1` | Requests per second across all workers; set it below your account's limit |
@@ -315,6 +315,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `DATA_DIR` | `/data` | Parent of the default folders below |
 | `STACKS_DIR` / `SCANNER_DIR` | `$DATA_DIR/stacks`, `$DATA_DIR/scanner` | Root of each input; `inbox/`, `output/`, `archive/` and `failed/` live below it |
 | `STACKS_ENABLED` / `SCANNER_ENABLED` | `true` | Switch an input off |
+| `SCANNER_NAMING` | `on` | `off`: scanner files keep their file name and get only the Tesseract text layer; no Mistral, see [OCR only, without Mistral](#ocr-only-without-mistral) |
 | `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` | `mistral` / `tesseract` | Text for splitting and naming: `mistral` (Mistral OCR) or `tesseract` (free, from the text layer). The scanner falls back to `mistral` when `OCRMYPDF_ENABLED=false` |
 | `WORK_DIR` | `/config` | OCR results, plans and review files |
 | `WORK_RETENTION_DAYS` | `30` | Days after which the work folder of a processed file is deleted; `rebuild` works until then. A `rebuild` restarts the count. `0` keeps everything |
@@ -540,6 +541,38 @@ In short: Mistral OCR splits somewhat better. For naming alone, as with
 scanner files, the difference was not measurable. That is why the defaults
 are what they are. If your scanner files are handwritten or of poor quality,
 `SCANNER_TEXT_SOURCE=mistral` may be worth the cost.
+
+## OCR only, without Mistral
+
+Sometimes all a document scanner needs is a searchable PDF under the name it
+gave the file. With `SCANNER_NAMING=off` the scanner input does just that:
+
+```
+scanner/inbox/Office/03102026104645.pdf
+        ↓
+scanner/output/Office/03102026104645.pdf   (Tesseract text layer added)
+```
+
+- Only Tesseract (ocrmypdf) runs: no Mistral OCR, no chat model, no cost.
+- Blank pages are dropped as usual (`DROP_BLANK_PAGES`), recognised by the
+  ink on the page.
+- A second file with the same name in the same folder becomes
+  `03102026104645 (2).pdf`; nothing is overwritten.
+- It needs `OCRMYPDF_ENABLED=true` (the default); `SCANNER_TEXT_SOURCE`
+  doesn't apply.
+
+`MISTRAL_API_KEY` is only required when an enabled input calls Mistral. To
+run without any key, switch the stacks off and the scanner's naming off:
+
+```
+STACKS_ENABLED=false
+SCANNER_NAMING=off
+```
+
+A Paperless input with the default `PAPERLESS_TEXT_SOURCE=tesseract` needs
+no key either. Splitting stacks always needs Mistral: finding where one
+document ends and the next begins takes the chat model. Without a key,
+nothing pauses for Mistral's spending limit, since nothing calls it.
 
 ## Paperless-ngx input
 

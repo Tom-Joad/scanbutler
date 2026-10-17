@@ -76,6 +76,9 @@ class Plan:
     profile: str = "stacks"
     # Where the text for splitting and naming came from (mistral or tesseract).
     text_source: str = "mistral"
+    # The input file's name is kept (SCANNER_NAMING=off): the one document's
+    # title is that name, written as it is.
+    keep_name: bool = False
 
     def save(self, path: Path) -> None:
         tmp = path.with_suffix(".tmp")

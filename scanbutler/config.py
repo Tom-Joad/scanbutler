@@ -58,6 +58,16 @@ def _bool(name: str, default: bool) -> bool:
     raise ConfigError(f"{name} must be true/false, got {raw!r}")
 
 
+def _naming(name: str) -> bool:
+    """on/off, also true/false: whether an input names its documents."""
+    raw = os.environ.get(name, "").strip().lower()
+    if raw in ("", "on", "true", "1", "yes"):
+        return True
+    if raw in ("off", "false", "0", "no"):
+        return False
+    raise ConfigError(f"{name} must be on or off, got {raw!r}")
+
+
 # Measured: four A4 pages with 1550-dpi colour images, downsampled to 600 dpi
 # and OCR'd with 4 jobs, peaked at 1.64 GB. Budget with headroom per parallel
 # page, plus a base for the app itself, Ghostscript and uploads.
@@ -155,6 +165,9 @@ class Profile:
     text_source: str = "mistral"
     # Hand the result to Paperless-ngx instead of writing it to output/.
     paperless: PaperlessTarget | None = None
+    # Name documents after their content. Off (scanner only): the output
+    # keeps the input's file name, and no model is asked.
+    naming: bool = True
 
     @property
     def upload(self) -> bool:
@@ -173,9 +186,11 @@ class Profile:
     @property
     def uses_mistral(self) -> bool:
         """Whether files of this input call Mistral (and so obey its pause)."""
-        # Stacks and scanner always ask the chat model for names; the
+        # Stacks and a naming scanner ask the chat model for names; the
         # Paperless input only calls Mistral when it fetches Mistral OCR.
-        return not self.upload or self.text_source == "mistral"
+        if self.upload:
+            return self.text_source == "mistral"
+        return self.naming
 
     @property
     def inbox(self) -> Path:
@@ -259,8 +274,6 @@ class Settings:
     @classmethod
     def from_env(cls, require_api_key: bool = True) -> "Settings":
         api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
-        if require_api_key and not api_key:
-            raise ConfigError("MISTRAL_API_KEY is not set")
 
         window = _int("BOUNDARY_WINDOW", 12, minimum=3)
         step = _int("BOUNDARY_STEP", max(1, window // 2), minimum=1)
@@ -286,14 +299,27 @@ class Settings:
         # text source), so scanner files skip the paid OCR by default. Without
         # ocrmypdf there is no Tesseract layer to read, so fall back to Mistral.
         scanner_default = "tesseract" if _bool("OCRMYPDF_ENABLED", True) else "mistral"
+        scanner_naming = _naming("SCANNER_NAMING")
+        if not scanner_naming:
+            # Only the Tesseract text layer: the output is the searchable PDF
+            # under the scanner's own file name.
+            if not _bool("OCRMYPDF_ENABLED", True):
+                raise ConfigError("SCANNER_NAMING=off needs OCRMYPDF_ENABLED=true: the text layer is all it adds")
+            if _str("SCANNER_TEXT_SOURCE", "tesseract").lower() == "mistral":
+                raise ConfigError("SCANNER_TEXT_SOURCE=mistral has no use with SCANNER_NAMING=off")
+            scanner_default = "tesseract"
         profiles = [
             Profile(
                 name,
                 Path(_str(f"{name.upper()}_DIR", str(data / name))),
                 split,
                 _str(f"{name.upper()}_TEXT_SOURCE", default_source).lower(),
+                naming=naming,
             )
-            for name, split, default_source in (("stacks", True, "mistral"), ("scanner", False, scanner_default))
+            for name, split, default_source, naming in (
+                ("stacks", True, "mistral", True),
+                ("scanner", False, scanner_default, scanner_naming),
+            )
             if _bool(f"{name.upper()}_ENABLED", True)
         ]
         paperless_url = os.environ.get("PAPERLESS_URL", "").strip()
@@ -351,6 +377,11 @@ class Settings:
                 raise ConfigError(f"{profile.env_prefix}_TEXT_SOURCE=tesseract needs OCRMYPDF_ENABLED=true")
         if not profiles:
             raise ConfigError("STACKS_ENABLED and SCANNER_ENABLED are both off")
+        # The key is only needed by inputs that call Mistral: stacks always,
+        # the scanner when it names files, Paperless with TEXT_SOURCE=mistral.
+        needing = [p.name for p in profiles if p.uses_mistral]
+        if require_api_key and needing and not api_key:
+            raise ConfigError(f"MISTRAL_API_KEY is not set; needed by: {', '.join(needing)}")
         return cls(
             api_key=api_key,
             api_base=_str("MISTRAL_API_BASE", "https://api.mistral.ai/v1").rstrip("/"),
