@@ -140,3 +140,18 @@ def test_rebuild_keeps_the_name_and_refuses_retitling(settings, tmp_path, monkey
     (work / PLAN).write_text(json.dumps(plan), encoding="utf-8")
     with pytest.raises(RuntimeError, match="keeps its name"):
         rebuild(work, settings, None)
+
+
+def test_a_hand_edited_kept_name_stays_in_the_output_folder(settings, tmp_path, monkeypatch):
+    scanner = _scanner(settings)
+    src = tmp_path / "scan.pdf"
+    make_text_pdf(src, ["front"])
+    monkeypatch.setattr(pdfops, "ink_coverage", lambda path: [0.05])
+    work = process_stack(src, PurePosixPath(""), settings, FakeBackend([]), scanner)
+
+    plan = json.loads((work / PLAN).read_text(encoding="utf-8"))
+    plan["documents"][0]["title"] = "../../escaped"
+    (work / PLAN).write_text(json.dumps(plan), encoding="utf-8")
+    [written] = rebuild(work, settings, None)
+    assert written.parent == scanner.output
+    assert "/" not in written.name and not written.name.startswith(".")
