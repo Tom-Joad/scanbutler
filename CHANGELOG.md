@@ -5,6 +5,13 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.7.1] - 2026-10-19
+
+### Fixed
+- With `SCANNER_NAMING=off`, a title changed by hand in `plan.json` is
+  cleaned like every other file name before `rebuild` writes it: a `/` or
+  `..` in it can no longer place the file outside the output folder.
+
 ## [1.7.0] - 2026-10-17
 
 ### Added

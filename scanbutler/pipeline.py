@@ -20,7 +20,7 @@ from pathlib import Path, PurePosixPath
 
 from . import boundaries, metadata, pdfops, priority, retention
 from .config import Profile, Settings
-from .naming import build_stem, unique_path
+from .naming import build_stem, sanitize, unique_path
 from .llm_cache import CachedChat
 from .ocr import BatchOptions, Page, run_ocr
 from .paperless import DuplicateFile, PaperlessError, PaperlessUnavailable, duplicate_of, task_document_id, task_message, task_status
@@ -269,7 +269,9 @@ def _write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
     written: list[Path] = []
     for doc, indices in zip(plan.documents, page_lists):
         if plan.keep_name:
-            stem = doc.title
+            # The input's own name, but plan.json is edited by hand: a "/"
+            # or ".." there must not lead outside the output folder.
+            stem = sanitize(doc.title) or "Document"
         else:
             stem = build_stem(settings.filename_pattern, doc.title, doc.date, settings.no_date_label)
         target = unique_path(out_dir, stem, taken=set(written))
