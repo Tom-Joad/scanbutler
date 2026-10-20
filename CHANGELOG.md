@@ -5,6 +5,13 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.7.2] - 2026-10-20
+
+### Security
+- The Mistral API key and the Paperless token are left out of the
+  settings' text form, so a traceback or a debug line that shows the
+  settings can't carry them. Nothing logged them so far.
+
 ## [1.7.1] - 2026-10-19
 
 ### Fixed
