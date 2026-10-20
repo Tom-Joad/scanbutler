@@ -117,3 +117,12 @@ def test_file_names_drop_invisible_format_characters():
     # U+202E would make "Invoice<RLO>fdp.exe" display as "Invoiceexe.pdf".
     assert sanitize("Invoice‮fdp.exe") == "Invoicefdp.exe"
     assert sanitize("Lab​results") == "Labresults"
+
+
+def test_settings_repr_has_no_secrets(monkeypatch):
+    import dataclasses
+
+    from scanbutler.config import Settings
+
+    hidden = {f.name for f in dataclasses.fields(Settings) if not f.repr}
+    assert {"api_key", "paperless_token"} <= hidden

@@ -216,7 +216,9 @@ class Profile:
 
 @dataclass(frozen=True)
 class Settings:
-    api_key: str
+    # repr=False: a repr of the settings (a traceback, a debug line) must
+    # never carry the key, as with PaperlessTarget.token.
+    api_key: str = field(repr=False)
     api_base: str
     ocr_model: str
     llm_model: str
@@ -257,7 +259,7 @@ class Settings:
 
     pause_retry_minutes: float
     paperless_url: str
-    paperless_token: str
+    paperless_token: str = field(repr=False)
     paperless_max_wait_minutes: float
     paperless_share_tags: bool
     paperless_share_correspondents: bool
