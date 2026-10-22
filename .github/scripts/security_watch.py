@@ -13,6 +13,14 @@ anything. Three checks:
    distribution ships it. Alpine images only: Debian backports fixes without
    changing the version, so comparing versions would raise false alarms.
 
+4. Release pull request: when the distribution already ships a fix (checks
+   1 and 2), a pull request `security-release` prepares the next patch
+   release (changelog entry, version files). Merging it is the approval:
+   .github/workflows/security-release.yml then tags and publishes. Needs
+   RELEASE_TOKEN, a token that can push and open pull requests, because
+   what GITHUB_TOKEN pushes or opens starts no other workflow (no tests on
+   the pull request, no build for the tag).
+
 An issue is opened once per finding: if an issue with the same title exists,
 open or closed, nothing happens. Closing an issue without fixing it
 therefore silences that finding for good.
@@ -22,7 +30,10 @@ row without it, an issue says so. The count is kept in STATE_DIR, which the
 workflow carries from one run to the next as an artifact.
 
 Environment: IMAGE (required), TRIVY_JSON, STATE_DIR, GH_TOKEN,
-GITHUB_REPOSITORY, DRY_RUN=1 (print the issues instead of opening them).
+GITHUB_REPOSITORY, DRY_RUN=1 (print the issues instead of opening them);
+for the release pull request RELEASE_TOKEN, CHANGELOG (default
+CHANGELOG.md), VERSION_FILES (space separated), TAG_PREFIX (default "v").
+`security_watch.py release` (run after the merge) tags and publishes.
 Standard library only.
 """
 
@@ -37,7 +48,7 @@ import time
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 
-IMAGE = os.environ["IMAGE"]
+IMAGE = os.environ.get("IMAGE", "")
 TRIVY_JSON = os.environ.get("TRIVY_JSON", "")
 STATE_DIR = os.environ.get("STATE_DIR", "")
 DRY_RUN = os.environ.get("DRY_RUN") == "1"
@@ -200,7 +211,9 @@ def trivy_findings(inv):
                 groups.setdefault((v["PkgName"], v["InstalledVersion"]), []).append(v)
             for (pkg, installed), vs in sorted(groups.items()):
                 fix = max((choose_fix(v["FixedVersion"], installed) for v in vs), key=apk_key)
+                ids = sorted({v["VulnerabilityID"] for v in vs})
                 out.append({
+                    "release": f"`{pkg}` {fix} ({', '.join(ids)})",
                     "key": f"{pkg} {fix} available",
                     "title": f"Security: {pkg} {fix} available (image has {installed})",
                     "section": "Trivy (HIGH/CRITICAL with a fix)",
@@ -234,18 +247,20 @@ def upgrade_findings(inv):
     out = []
     if inv["distro"] == "alpine":
         # nginx-1.30.6-r0 x86_64 {nginx} (BSD-2-Clause) [upgradable from: nginx-1.30.4-r1]
-        rx = re.compile(r"^(.+)-(\d[^-]*-r\d+) \S+ \{.*\[upgradable from: .+-(\d[^-]*-r\d+)\]")
+        rx = re.compile(r"^(.+)-(\d[^-]*-r\d+) \S+ \{(.+?)\}.*\[upgradable from: .+-(\d[^-]*-r\d+)\]")
         for line in inv["upgrades"].splitlines():
             m = rx.match(line)
             if m and ALPINE_TRACKED.match(m.group(1)):
-                out.append((m.group(1), m.group(2), m.group(3), "Alpine"))
+                fixes = [c for ver, cves in secdb(inv).get(m.group(3), [])
+                         if ver == apk_key(m.group(2)) for c in sorted(cves)]
+                out.append((m.group(1), m.group(2), m.group(4), "Alpine", fixes))
     elif inv["distro"] == "debian":
         # curl/stable-security 8.14.1-2+deb13u8 amd64 [upgradable from: 8.14.1-2+deb13u7]
         rx = re.compile(r"^([^/]+)/(\S+) (\S+) \S+ \[upgradable from: (\S+)\]")
         for line in inv["upgrades"].splitlines():
             m = rx.match(line)
             if m and "security" in m.group(2):
-                out.append((m.group(1), m.group(3), m.group(4), "Debian security"))
+                out.append((m.group(1), m.group(3), m.group(4), "Debian security", []))
     if not inv["upgrades"].strip() and inv["distro"] in ("alpine", "debian"):
         # Either nothing to upgrade or the index couldn't be fetched; apk and
         # apt print nothing in both cases. An up-to-date image is the normal
@@ -255,9 +270,11 @@ def upgrade_findings(inv):
         "key": f"{pkg} {new} available",
         "title": f"Security: {pkg} {new} available (image has {old})",
         "section": f"{origin} package update",
-        "text": f"The {origin} repository has `{pkg}` {new}; the image has {old}.",
+        "text": f"The {origin} repository has `{pkg}` {new}; the image has {old}."
+                + (f" It fixes {', '.join(cves)}." if cves else ""),
         "todo": "Rebuild the image and publish a patch release.",
-    } for pkg, new, old, origin in out]
+        "release": f"`{pkg}` {new}" + (f" ({', '.join(cves)})" if cves else ""),
+    } for pkg, new, old, origin, cves in out]
 
 
 # --- check 3: upstream ---------------------------------------------------------
@@ -591,6 +608,146 @@ def failure_findings():
     return out
 
 
+# --- release pull request -------------------------------------------------------
+
+RELEASE_BRANCH = "security-release"
+RELEASE_LABEL = "security-release"
+CHANGELOG = os.environ.get("CHANGELOG", "CHANGELOG.md")
+VERSION_FILES = os.environ.get("VERSION_FILES", "").split()
+TAG_PREFIX = os.environ.get("TAG_PREFIX", "v")
+HEADING = re.compile(r"^## \[?(\d+\.\d+\.\d+)\]?(?: - \S+)?\s*$", re.M)
+
+
+def bump(version, unreleased):
+    major, minor, patch = vt(version)[:3]
+    if re.search(r"^### Added", unreleased, re.M):
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def new_changelog(text, lines, repo):
+    """Changelog with the next version's entry; (text, old, new, notes)."""
+    m = HEADING.search(text)
+    if not m:
+        raise RuntimeError(f"no released version in {CHANGELOG}")
+    old = m.group(1)
+    bracket = m.group(0).startswith("## [")
+    security = "".join(f"- {line}\n" for line in lines)
+    unrel = re.search(r"^## \[?Unreleased\]?\s*\n(.*?)(?=^## )", text, re.M | re.S)
+    body = unrel.group(1).strip("\n") if unrel else ""
+    new = bump(old, body)
+    intro = ("- Security updates of the distribution packages, picked up "
+             "by rebuilding the image:\n")
+    if re.search(r"^### Security\s*$", body, re.M):
+        body = re.sub(r"^### Security\s*\n", lambda _: "### Security\n" + intro
+                      + "".join("  " + l + "\n" for l in security.splitlines()),
+                      body, count=1, flags=re.M)
+    else:
+        body = (body + "\n\n" if body else "") + "### Security\n" + intro + "".join(
+            "  " + l + "\n" for l in security.splitlines())
+    title = f"## [{new}] - {date.today().isoformat()}" if bracket else \
+        f"## {new} - {date.today().isoformat()}"
+    entry = f"{title}\n\n{body.strip()}\n\n"
+    if unrel:
+        text = text[:unrel.start()] + entry + text[unrel.end():]
+    else:
+        text = text[:m.start()] + entry + text[m.start():]
+    link = re.search(rf"^\[{re.escape(old)}\]: \S+$", text, re.M)
+    if link:
+        url = (f"https://github.com/{repo}/compare/"
+               f"{TAG_PREFIX}{old}...{TAG_PREFIX}{new}")
+        text = text[:link.start()] + f"[{new}]: {url}\n" + text[link.start():]
+    return text, old, new, body.strip()
+
+
+def bump_version_files(old, new):
+    for path in VERSION_FILES:
+        text = open(path).read()
+        if os.path.basename(path) == "VERSION":
+            text = text.replace(old, new, 1)
+        else:
+            # Only lines that name the version (`__version__ = "1.2.3"`,
+            # `version: "1.2.3"`), not every occurrence of the number.
+            text = re.sub(rf"^(.*version.*){re.escape(old)}(.*)$",
+                          lambda m: m.group(1) + new + m.group(2),
+                          text, count=1, flags=re.M | re.I)
+        if new not in text:
+            raise RuntimeError(f"{path}: version {old} not found")
+        open(path, "w").write(text)
+
+
+def release_pr(items):
+    token = os.environ.get("RELEASE_TOKEN")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    if not token:
+        warn("no RELEASE_TOKEN: no release pull request")
+        return
+    env = {**os.environ, "GH_TOKEN": token}
+    run = lambda *a: subprocess.run(a, check=True, capture_output=True,
+                                    text=True, env=env).stdout
+    if json.loads(run("gh", "pr", "list", "--head", RELEASE_BRANCH,
+                      "--state", "open", "--json", "number")):
+        print("Release pull request already open.")
+        return
+    lines = sorted({i["line"] for i in items})
+    text, old, new, notes = new_changelog(open(CHANGELOG).read(), lines, repo)
+    run("git", "checkout", "-B", RELEASE_BRANCH)
+    open(CHANGELOG, "w").write(text)
+    bump_version_files(old, new)
+    run("git", "add", CHANGELOG, *VERSION_FILES)
+    run("git", "-c", "user.name=github-actions[bot]",
+        "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+        "commit", "-m", f"Release {new} with security updates")
+    run("git", "push", "--force",
+        f"https://x-access-token:{token}@github.com/{repo}.git",
+        f"HEAD:refs/heads/{RELEASE_BRANCH}")
+    labels = json.loads(run("gh", "label", "list", "--limit", "200", "--json", "name"))
+    if RELEASE_LABEL not in {n["name"] for n in labels}:
+        run("gh", "label", "create", RELEASE_LABEL, "--color", "0E8A16",
+            "--description", "Merging it publishes the release")
+    closes = sorted({n for i in items for n in i["issues"]})
+    body = (f"Release **{new}** (was {old}). The distribution already ships "
+            "these fixes; rebuilding the image picks them up:\n\n"
+            + "".join(f"- {l}\n" for l in lines)
+            + "\n**Merging this pull request publishes the release**: "
+            "`security-release.yml` tags "
+            f"`{TAG_PREFIX}{new}`, creates the GitHub release and the build "
+            "publishes the image. Installations with automatic updates get it "
+            "right after.\n\nChangelog entry:\n\n" + notes + "\n\n"
+            + "".join(f"Closes #{n}\n" for n in closes)
+            + "\n---\nOpened by the daily security watch. Close it without "
+            "merging to skip this release.")
+    url = run("gh", "pr", "create", "--head", RELEASE_BRANCH, "--base", "main",
+              "--title", f"Release {new}: security updates", "--body", body,
+              "--label", RELEASE_LABEL).strip()
+    print(f"Release pull request: {url}")
+
+
+def publish_release():
+    """After the release pull request is merged: tag and publish."""
+    text = open(CHANGELOG).read()
+    m = HEADING.search(text)
+    version = m.group(1)
+    end = re.compile(r"^## ", re.M).search(text, m.end())
+    notes = text[m.end():end.start() if end else len(text)].strip()
+    notes = re.sub(r"^\[\d+\.\d+\.\d+\]: \S+\s*$", "", notes, flags=re.M).strip()
+    tag = f"{TAG_PREFIX}{version}"
+    if subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
+                      capture_output=True).returncode == 0:
+        print(f"{tag} exists already; nothing to do.")
+        return
+    git = ["git", "-c", "user.name=github-actions[bot]",
+           "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com"]
+    subprocess.run(git + ["tag", "-a", tag, "-m", f"Release {version}"], check=True)
+    # The checkout's credentials are RELEASE_TOKEN's, so the tag starts the build.
+    subprocess.run(["git", "push", "origin", tag], check=True)
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+        f.write(notes + "\n")
+    subprocess.run(["gh", "release", "create", tag, "--title", version,
+                    "--notes-file", f.name, "--verify-tag"], check=True)
+    print(f"Published {tag}")
+
+
 # --- issues -------------------------------------------------------------------
 
 
@@ -599,10 +756,15 @@ def gh(*args):
                           check=True).stdout
 
 
-def existing_titles():
+def existing_issues():
     out = gh("issue", "list", "--state", "all", "--label", LABEL,
-             "--limit", "1000", "--json", "title")
-    return [i["title"] for i in json.loads(out)]
+             "--limit", "1000", "--json", "number,title,state")
+    return json.loads(out)
+
+
+def stem(title):
+    # The installed version may differ between runs; match on the rest.
+    return title.split(" (image has")[0]
 
 
 def ensure_label():
@@ -629,16 +791,22 @@ def main():
     if not merged:
         print("Nothing found.")
         return
-    titles = [] if DRY_RUN else existing_titles()
+    issues = [] if DRY_RUN else existing_issues()
     if not DRY_RUN:
         ensure_label()
+    release_items = []
     run_url = "{}/{}/actions/runs/{}".format(
         os.environ.get("GITHUB_SERVER_URL", "https://github.com"),
         os.environ.get("GITHUB_REPOSITORY", ""), os.environ.get("GITHUB_RUN_ID", ""))
     for f in merged.values():
-        # The installed version may differ between runs; match on the rest.
-        stem = f["title"].split(" (image has")[0]
-        if any(t.split(" (image has")[0] == stem for t in titles):
+        known = [i for i in issues if stem(i["title"]) == stem(f["title"])]
+        if f.get("release"):
+            # Fixed by a rebuild: part of the release pull request, unless
+            # the issue was closed without a fix (dismissed).
+            open_ = [i["number"] for i in known if i["state"] == "OPEN"]
+            if open_ or not known:
+                release_items.append({"line": f["release"], "issues": open_})
+        if known:
             print(f"Already reported: {f['title']}")
             continue
         body = f"Image: `{IMAGE}`\n\n"
@@ -650,14 +818,18 @@ def main():
         if DRY_RUN:
             print(f"\n=== {f['title']}\n{body}")
         else:
-            gh("issue", "create", "--title", f["title"], "--label", LABEL,
-               "--body", body)
+            url = gh("issue", "create", "--title", f["title"], "--label", LABEL,
+                     "--body", body).strip()
             print(f"Opened: {f['title']}")
+            if f.get("release") and release_items:
+                release_items[-1]["issues"].append(int(url.rsplit("/", 1)[1]))
+    if release_items:
+        release_pr(release_items)
 
 
 if __name__ == "__main__":
     try:
-        main()
+        publish_release() if sys.argv[1:] == ["release"] else main()
     except subprocess.CalledProcessError as e:
         print(e.stderr or e, file=sys.stderr)
         raise

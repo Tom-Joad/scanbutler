@@ -1,0 +1,41 @@
+name: Security release
+
+# Publishes the release that the security watch prepared, once its pull
+# request (branch `security-release`) is merged: tags the version from the
+# changelog and creates the GitHub release; the tag (or the release, for
+# Home Assistant add-ons) starts the build. Merging is the approval.
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  # Same values as in security-watch.yml.
+  CHANGELOG: CHANGELOG.md
+  TAG_PREFIX: "v"
+
+jobs:
+  release:
+    if: >-
+      github.event.pull_request.merged &&
+      github.event.pull_request.head.ref == 'security-release' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      # RELEASE_TOKEN, not GITHUB_TOKEN: a tag or release made with
+      # GITHUB_TOKEN starts no build.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: python3 .github/scripts/security_watch.py release
