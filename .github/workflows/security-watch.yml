@@ -1,0 +1,79 @@
+name: Security watch
+
+# Checks the published image once a day and opens an issue per finding:
+# Trivy (HIGH/CRITICAL with a fix), package updates the distribution already
+# ships, and upstream security releases of the big packages (nginx, Node.js,
+# PHP, Python, OpenSSL, curl, Git) that the distribution doesn't ship yet.
+# It never builds, tags or releases anything. See
+# .github/scripts/security_watch.py.
+
+on:
+  schedule:
+    # 03:17 UTC = 05:17 in summer, 04:17 in winter (Germany). Not on the hour:
+    # scheduled runs start late when everyone's start at the same minute.
+    - cron: "17 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/tom-joad/scanbutler:latest
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      # Reading the previous run's state artifact.
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Pull the image
+        run: docker pull "$IMAGE"
+
+      - name: Trivy report
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        # A failed scan is reported by the script (no report), not here.
+        continue-on-error: true
+        with:
+          image-ref: ${{ env.IMAGE }}
+          scanners: vuln
+          format: json
+          output: trivy.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Previous state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          prev=$(gh run list --workflow security-watch.yml --status success \
+            --limit 5 --json databaseId \
+            -q "[.[] | select(.databaseId != $RUN_ID)][0].databaseId // empty")
+          if [ -n "$prev" ]; then
+            gh run download "$prev" --name security-watch-state --dir state \
+              || echo "No state from run $prev; starting fresh."
+          fi
+          mkdir -p state
+
+      - name: Check and open issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRIVY_JSON: trivy.json
+          STATE_DIR: state
+        run: python3 .github/scripts/security_watch.py
+
+      - name: Keep state for the next run
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: security-watch-state
+          path: state/state.json
+          retention-days: 14
+          if-no-files-found: ignore
