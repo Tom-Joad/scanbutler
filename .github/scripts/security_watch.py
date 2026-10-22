@@ -698,7 +698,9 @@ def release_pr(items):
     run("git", "-c", "user.name=github-actions[bot]",
         "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
         "commit", "-m", f"Release {new} with security updates")
-    run("git", "push", "--force",
+    # Clear actions/checkout's GITHUB_TOKEN header, which would win over the
+    # token in the URL (and can't start the pull request's tests).
+    run("git", "-c", "http.https://github.com/.extraheader=", "push", "--force",
         f"https://x-access-token:{token}@github.com/{repo}.git",
         f"HEAD:refs/heads/{RELEASE_BRANCH}")
     labels = json.loads(run("gh", "label", "list", "--limit", "200", "--json", "name"))
