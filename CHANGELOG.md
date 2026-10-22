@@ -8,6 +8,8 @@ layout, a changed webhook payload) only comes with a new major version.
 ## [1.7.3] - 2026-10-22
 
 ### Security
+- Pillow 13.0.0 (was 12.3.0), which fixes 24 vulnerabilities in image
+  decoding.
 - Security updates of the distribution packages, picked up by rebuilding the image:
   - `ca-certificates` 20250419+deb13u1
 
