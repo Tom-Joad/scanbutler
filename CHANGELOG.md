@@ -5,6 +5,12 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.7.3] - 2026-10-22
+
+### Security
+- Security updates of the distribution packages, picked up by rebuilding the image:
+  - `ca-certificates` 20250419+deb13u1
+
 ## [1.7.2] - 2026-10-20
 
 ### Security
