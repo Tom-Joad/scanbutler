@@ -14,8 +14,12 @@ anything. Three checks:
    changing the version, so comparing versions would raise false alarms.
 
 4. Release pull request: when the distribution already ships a fix (checks
-   1 and 2), a pull request `security-release` prepares the next patch
-   release (changelog entry, version files). Merging it is the approval:
+   1 and 2), or when main has unreleased changes (an `[Unreleased]` entry
+   in the changelog, or Dependabot updates since the last tag that change
+   more than `.github/`), a pull request `security-release` prepares the
+   next release (changelog entry, version files). Closing it without a
+   merge skips the unreleased changes until main changes again; security
+   fixes open it anyway. Merging it is the approval:
    .github/workflows/security-release.yml then tags and publishes. Needs
    RELEASE_TOKEN, a token that can push and open pull requests, because
    what GITHUB_TOKEN pushes or opens starts no other workflow (no tests on
@@ -625,26 +629,67 @@ def bump(version, unreleased):
     return f"{major}.{minor}.{patch + 1}"
 
 
-def new_changelog(text, lines, repo):
+UNRELEASED = re.compile(r"^## \[?Unreleased\]?\s*\n(.*?)(?=^## )", re.M | re.S)
+
+
+def unreleased_body(text):
+    m = UNRELEASED.search(text)
+    return m.group(1).strip("\n") if m else ""
+
+
+def add_to_section(body, section, intro, lines):
+    """Append `intro` with `lines` as sub-items to `### section`."""
+    block = intro + "".join(f"  - {l}\n" for l in lines)
+    if re.search(rf"^### {section}\s*$", body, re.M):
+        return re.sub(rf"^### {section}\s*\n", lambda _: f"### {section}\n" + block,
+                      body, count=1, flags=re.M)
+    return (body.rstrip("\n") + "\n\n" if body else "") + f"### {section}\n" + block
+
+
+def dependency_updates(text):
+    """Dependabot updates on main since the last tag, not yet in [Unreleased].
+
+    Updates that only touch .github/ (actions) don't change what users get
+    and are left out."""
+    tag = subprocess.run(["git", "describe", "--tags", "--abbrev=0",
+                          "--match", f"{TAG_PREFIX}[0-9]*"],
+                         capture_output=True, text=True)
+    if tag.returncode:
+        warn("no release tag found: no dependency updates")
+        return []
+    log = subprocess.run(["git", "log", "--format=%an%x09%s",
+                          f"{tag.stdout.strip()}..HEAD", "--", ".",
+                          ":(exclude).github"],
+                         capture_output=True, text=True, check=True).stdout
+    body = unreleased_body(text)
+    out = []
+    for line in log.splitlines():
+        author, _, subject = line.partition("\t")
+        m = re.match(r"(?i)bump (\S+) (.*?)(?: \(#\d+\))?$", subject)
+        if author != "dependabot[bot]" or not m:
+            continue
+        # Already described by hand (or a second bump of the same package).
+        if m.group(1) in body or any(o.startswith(m.group(1) + " ") for o in out):
+            continue
+        out.append(f"{m.group(1)} {m.group(2)}")
+    return out
+
+
+def new_changelog(text, lines, repo, updates=()):
     """Changelog with the next version's entry; (text, old, new, notes)."""
     m = HEADING.search(text)
     if not m:
         raise RuntimeError(f"no released version in {CHANGELOG}")
     old = m.group(1)
     bracket = m.group(0).startswith("## [")
-    security = "".join(f"- {line}\n" for line in lines)
-    unrel = re.search(r"^## \[?Unreleased\]?\s*\n(.*?)(?=^## )", text, re.M | re.S)
-    body = unrel.group(1).strip("\n") if unrel else ""
+    unrel = UNRELEASED.search(text)
+    body = unreleased_body(text)
     new = bump(old, body)
-    intro = ("- Security updates of the distribution packages, picked up "
-             "by rebuilding the image:\n")
-    if re.search(r"^### Security\s*$", body, re.M):
-        body = re.sub(r"^### Security\s*\n", lambda _: "### Security\n" + intro
-                      + "".join("  " + l + "\n" for l in security.splitlines()),
-                      body, count=1, flags=re.M)
-    else:
-        body = (body + "\n\n" if body else "") + "### Security\n" + intro + "".join(
-            "  " + l + "\n" for l in security.splitlines())
+    if updates:
+        body = add_to_section(body, "Changed", "- Updated dependencies:\n", updates)
+    if lines:
+        body = add_to_section(body, "Security", "- Security updates of the distribution "
+                              "packages, picked up by rebuilding the image:\n", lines)
     title = f"## [{new}] - {date.today().isoformat()}" if bracket else \
         f"## {new} - {date.today().isoformat()}"
     entry = f"{title}\n\n{body.strip()}\n\n"
@@ -677,6 +722,8 @@ def bump_version_files(old, new):
 
 
 def release_pr(items):
+    """Release pull request for security fixes (`items`) and unreleased
+    changes; does nothing when there is neither."""
     token = os.environ.get("RELEASE_TOKEN")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
     if not token:
@@ -685,19 +732,33 @@ def release_pr(items):
     env = {**os.environ, "GH_TOKEN": token}
     run = lambda *a: subprocess.run(a, check=True, capture_output=True,
                                     text=True, env=env).stdout
-    if json.loads(run("gh", "pr", "list", "--head", RELEASE_BRANCH,
-                      "--state", "open", "--json", "number")):
+    prs = json.loads(run("gh", "pr", "list", "--head", RELEASE_BRANCH,
+                         "--state", "all", "--json", "state,closedAt"))
+    if any(p["state"] == "OPEN" for p in prs):
         print("Release pull request already open.")
         return
+    text = open(CHANGELOG).read()
     lines = sorted({i["line"] for i in items})
-    text, old, new, notes = new_changelog(open(CHANGELOG).read(), lines, repo)
+    updates = dependency_updates(text)
+    if not lines:
+        if not (unreleased_body(text) or updates):
+            print("No unreleased changes.")
+            return
+        # Closing the pull request skips these changes until main changes.
+        head = run("git", "log", "-1", "--format=%cI").strip()
+        last = max((p["closedAt"] for p in prs if p["state"] == "CLOSED"), default="")
+        closed = last and datetime.fromisoformat(last.replace("Z", "+00:00"))
+        if closed and closed > datetime.fromisoformat(head):
+            print("Release pull request was closed after the last change on main.")
+            return
+    text, old, new, notes = new_changelog(text, lines, repo, updates)
     run("git", "checkout", "-B", RELEASE_BRANCH)
     open(CHANGELOG, "w").write(text)
     bump_version_files(old, new)
     run("git", "add", CHANGELOG, *VERSION_FILES)
     run("git", "-c", "user.name=github-actions[bot]",
         "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
-        "commit", "-m", f"Release {new} with security updates")
+        "commit", "-m", f"Release {new}" + (" with security updates" if lines else ""))
     # Clear actions/checkout's GITHUB_TOKEN header, which would win over the
     # token in the URL (and can't start the pull request's tests).
     run("git", "-c", "http.https://github.com/.extraheader=", "push", "--force",
@@ -708,9 +769,12 @@ def release_pr(items):
         run("gh", "label", "create", RELEASE_LABEL, "--color", "0E8A16",
             "--description", "Merging it publishes the release")
     closes = sorted({n for i in items for n in i["issues"]})
-    body = (f"Release **{new}** (was {old}). The distribution already ships "
-            "these fixes; rebuilding the image picks them up:\n\n"
-            + "".join(f"- {l}\n" for l in lines)
+    if lines:
+        why = ("The distribution already ships these fixes; rebuilding the "
+               "image picks them up:\n\n" + "".join(f"- {l}\n" for l in lines))
+    else:
+        why = "Main has changes that aren't released yet (see the changelog entry).\n"
+    body = (f"Release **{new}** (was {old}). " + why
             + "\n**Merging this pull request publishes the release**: "
             "`security-release.yml` tags "
             f"`{TAG_PREFIX}{new}`, creates the GitHub release and the build "
@@ -718,9 +782,10 @@ def release_pr(items):
             "right after.\n\nChangelog entry:\n\n" + notes + "\n\n"
             + "".join(f"Closes #{n}\n" for n in closes)
             + "\n---\nOpened by the daily security watch. Close it without "
-            "merging to skip this release.")
+            "merging to skip this release (until main changes again).")
+    title = f"Release {new}" + (": security updates" if lines else "")
     url = run("gh", "pr", "create", "--head", RELEASE_BRANCH, "--base", "main",
-              "--title", f"Release {new}: security updates", "--body", body,
+              "--title", title, "--body", body,
               "--label", RELEASE_LABEL).strip()
     print(f"Release pull request: {url}")
 
@@ -792,6 +857,8 @@ def main():
 
     if not merged:
         print("Nothing found.")
+        if not DRY_RUN:
+            release_pr([])
         return
     issues = [] if DRY_RUN else existing_issues()
     if not DRY_RUN:
@@ -825,7 +892,7 @@ def main():
             print(f"Opened: {f['title']}")
             if f.get("release") and release_items:
                 release_items[-1]["issues"].append(int(url.rsplit("/", 1)[1]))
-    if release_items:
+    if not DRY_RUN:
         release_pr(release_items)
 
 

@@ -4,10 +4,11 @@ name: Security watch
 # Trivy (HIGH/CRITICAL with a fix), package updates the distribution already
 # ships, and upstream security releases of the big packages (nginx, Node.js,
 # PHP, Python, OpenSSL, curl, Git) that the distribution doesn't ship yet.
-# When the distribution already ships a fix, it also opens the pull request
-# `security-release` for the next patch release; merging it is the approval,
-# security-release.yml then tags and publishes. Nothing is released without
-# that merge. See .github/scripts/security_watch.py.
+# When the distribution already ships a fix, or main has unreleased changes
+# (changelog `[Unreleased]`, Dependabot updates since the last tag), it also
+# opens the pull request `security-release` for the next release; merging it
+# is the approval, security-release.yml then tags and publishes. Nothing is
+# released without that merge. See .github/scripts/security_watch.py.
 
 on:
   schedule:
@@ -42,6 +43,9 @@ jobs:
           # The release pull request is pushed with RELEASE_TOKEN; a stored
           # GITHUB_TOKEN would be used instead and be refused.
           persist-credentials: false
+          # Tags and history: Dependabot updates since the last release go
+          # into the release pull request.
+          fetch-depth: 0
 
       - name: Pull the image
         run: docker pull "$IMAGE"
