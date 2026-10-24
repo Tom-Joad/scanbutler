@@ -5,6 +5,17 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.7.4] - 2026-10-24
+
+### Changed
+- Updated dependencies:
+  - linuxserver/baseimage-debian from `c12aa85` to `0429544`
+
+### Security
+- Security updates of the distribution packages, picked up by rebuilding the image:
+  - `libbrotli1` 1.1.0-2+deb13u1 (CVE-2026-111497)
+  - `libunbound8` 1.26.2-0+deb13u1
+
 ## [1.7.3] - 2026-10-22
 
 ### Security
