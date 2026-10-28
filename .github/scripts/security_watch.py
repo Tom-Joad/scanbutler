@@ -12,6 +12,11 @@ anything. Three checks:
    curl or Git that is newer than what the image has, before the
    distribution ships it. Alpine images only: Debian backports fixes without
    changing the version, so comparing versions would raise false alarms.
+5. Bundled libraries: C libraries that Python wheels carry in their own
+   `<package>.libs/` folder (Pillow's brotli, libpng, FreeType ...), which
+   neither Trivy nor the distribution sees. Their version is read from the
+   library itself and compared with Alpine's security database (edge), which
+   lists the upstream version of every fix. Any distribution.
 
 4. Release pull request: when the distribution already ships a fix (checks
    1 and 2), or when main has unreleased changes (an `[Unreleased]` entry
@@ -137,6 +142,52 @@ echo ---NODE
 node -v 2>/dev/null
 echo ---PY
 python3 -c 'import platform; print(platform.python_version())' 2>/dev/null
+echo ---BUNDLED
+PY=$(command -v python3 || ls /lsiopy/bin/python3 2>/dev/null)
+if [ -n "$PY" ]; then
+cat > /tmp/bundled.py <<'PYEOF'
+import ctypes, os, re, sys
+# file name prefix -> (Alpine source package, how to read the version)
+LIBS = {
+    "libbrotlidec": ("brotli", "brotli"), "liblzma": ("xz", "lzma_version_string"),
+    "libz": ("zlib", "zlibVersion"), "libopenjp2": ("openjpeg", "opj_version"),
+    "libpng16": ("libpng", "png"), "libzstd": ("zstd", "ZSTD_versionString"),
+    "liblcms2": ("lcms2", "lcms"), "libtiff": ("tiff", "tiff"),
+    "libfreetype": ("freetype", "freetype"), "libharfbuzz": ("harfbuzz", "hb_version_string"),
+    "libwebp": ("libwebp", "webp"), "libavif": ("libavif", "avifVersion"),
+    "libqpdf": ("qpdf", "qpdf_get_qpdf_version"),
+}
+def version(lib, how):
+    if how == "brotli":
+        v = lib.BrotliDecoderVersion(); return f"{v >> 24}.{(v >> 12) & 0xfff}.{v & 0xfff}"
+    if how == "webp":
+        v = lib.WebPGetDecoderVersion(); return f"{v >> 16}.{(v >> 8) & 0xff}.{v & 0xff}"
+    if how == "lcms":
+        v = lib.cmsGetEncodedCMMversion(); return f"{v // 1000}.{v % 1000 // 10}" + (f".{v % 10}" if v % 10 else "")
+    if how == "freetype":
+        h, a, b, c = ctypes.c_void_p(), ctypes.c_int(), ctypes.c_int(), ctypes.c_int()
+        lib.FT_Init_FreeType(ctypes.byref(h))
+        lib.FT_Library_Version(h, ctypes.byref(a), ctypes.byref(b), ctypes.byref(c))
+        return f"{a.value}.{b.value}.{c.value}"
+    fn = getattr(lib, "png_get_libpng_ver" if how == "png" else "TIFFGetVersion" if how == "tiff" else how)
+    fn.restype = ctypes.c_char_p
+    text = (fn(None) if how == "png" else fn()).decode()
+    return re.search(r"\d+\.\d+(\.\d+)*", text).group(0)
+for path in sys.stdin.read().split():
+    m = re.match(r"(lib[a-z0-9]+?)(-[0-9a-f]{8})?\.so", os.path.basename(path))
+    if not m or m.group(1) not in LIBS:
+        continue
+    project, how = LIBS[m.group(1)]
+    try:
+        v = version(ctypes.CDLL(path), how)
+    except Exception:
+        continue
+    owner = os.path.basename(os.path.dirname(path)).removesuffix(".libs")
+    print(owner, os.path.basename(path), project, v, sep="\t")
+PYEOF
+find / -xdev \( -path /proc -o -path /sys \) -prune -o -type f -path '*-packages/*.libs/*.so*' -print 2>/dev/null \
+  | "$PY" /tmp/bundled.py 2>/dev/null
+fi
 echo ---UPGRADES
 if command -v apk >/dev/null; then
   apk update -q >/dev/null 2>&1 && apk list -u 2>/dev/null
@@ -169,6 +220,8 @@ def inventory():
         "pkgs": pkgs,
         "node": parts["NODE"].strip(),
         "python": parts["PY"].strip(),
+        "bundled": [tuple(line.split("\t")) for line in parts["BUNDLED"].splitlines()
+                    if line.count("\t") == 3],
         "upgrades": parts["UPGRADES"],
     }
 
@@ -578,6 +631,55 @@ def upstream_findings(inv):
     return [f for f in found if f]
 
 
+# --- check 5: libraries bundled in Python wheels ---------------------------------
+
+
+def fixed_after(fix, installed):
+    """Alpine fix (version key) not in the installed upstream version: a newer
+    upstream version, or a patch (-r1 and up) on the same one."""
+    (up, r), have = fix, vt(installed)
+    return up > have or (up == have and r > 0)
+
+
+@source("Alpine secdb (edge)")
+def bundled_findings(inv):
+    if not inv["bundled"]:
+        return []
+    db = {}
+    for repo in ("main", "community"):
+        data = json.loads(fetch(f"https://secdb.alpinelinux.org/edge/{repo}.json"))
+        for p in data["packages"]:
+            for ver, fixes in p["pkg"].get("secfixes", {}).items():
+                db.setdefault(p["pkg"]["name"], []).append(
+                    (ver, apk_key(ver), sorted(set(CVE_RE.findall(" ".join(fixes))))))
+    out = []
+    for owner, files, project, installed in sorted({(o, f, p, v) for o, f, p, v in inv["bundled"]}):
+        hits = [(ver, cves) for ver, key, cves in db.get(project, [])
+                if cves and fixed_after(key, installed)]
+        if not hits:
+            continue
+        last = newest([c for _, cves in hits for c in cves])
+        text = "\n".join(f"- {', '.join(cves)}: fixed in Alpine `{project}` {ver}"
+                         for ver, cves in sorted(hits, key=lambda h: apk_key(h[0])))
+        text += (f"\n\n`{files}` in the Python package `{owner}` reports {project} "
+                 f"{installed}. Source: https://security.alpinelinux.org/srcpkg/{project}")
+        out.append({
+            "key": f"{owner} bundles {project} without {last}",
+            "title": f"Security: {owner} bundles {project} without the fix for "
+                     f"{last} (image has {installed})",
+            "section": f"Bundled in {owner}",
+            "text": text,
+            "todo": f"The library comes inside the Python package `{owner}`, not from "
+                    "the distribution, so a rebuild doesn't help. Update the package "
+                    "once a release bundles the fix (Dependabot proposes it; check its "
+                    "changelog) and publish a patch release. Until then check whether "
+                    "the vulnerable code is reachable in this container. A fix the "
+                    "upstream version already has (Alpine only patched its own build) "
+                    "can be dismissed by closing this issue.",
+        })
+    return out
+
+
 # --- source failures ------------------------------------------------------------
 
 
@@ -846,6 +948,7 @@ def main():
     print(f"{IMAGE}: {inv['distro']} {inv['distro_version']}, "
           f"{len(inv['pkgs'])} packages")
     findings = trivy_findings(inv) + upgrade_findings(inv) + upstream_findings(inv)
+    findings += bundled_findings(inv)
     findings += failure_findings()
 
     merged = {}
