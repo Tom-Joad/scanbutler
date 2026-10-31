@@ -5,6 +5,12 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.7.5] - 2026-10-31
+
+### Changed
+- Updated dependencies:
+  - linuxserver/baseimage-debian from `0429544` to `ffd2425`
+
 ## [1.7.4] - 2026-10-24
 
 ### Changed
