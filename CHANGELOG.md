@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.8.0] - 2026-11-04
 
 ### Added
 - `MISTRAL_REASONING_EFFORT` for reasoning models such as Mistral Large 4.
@@ -18,6 +18,12 @@ layout, a changed webhook payload) only comes with a new major version.
   4, which reject a temperature of 0 unless `top_p` is 1.
   `mistral-large-latest` still points to Mistral Large 3, so the default is
   unaffected for now; Mistral retires Large 3 on 2027-04-30.
+
+### Security
+- Security updates of the distribution packages, picked up by rebuilding the image:
+  - `apt-utils` 3.0.4
+  - `apt` 3.0.4
+  - `libapt-pkg7.0` 3.0.4
 
 ## [1.7.5] - 2026-10-31
 
