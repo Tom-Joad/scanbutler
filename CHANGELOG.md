@@ -5,6 +5,14 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- Splitting and naming also work with reasoning models such as Mistral Large
+  4, which reject a temperature of 0 unless `top_p` is 1.
+  `mistral-large-latest` still points to Mistral Large 3, so the default is
+  unaffected for now; Mistral retires Large 3 on 2027-04-30.
+
 ## [1.7.5] - 2026-10-31
 
 ### Changed

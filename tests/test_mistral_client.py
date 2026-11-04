@@ -77,3 +77,26 @@ def test_rate_limit_is_retried():
 
     assert c.submit_batch("/v1/ocr", "ocr-model", [("a", c.ocr_body(b"%PDF"))])["job"] == "job-1"
     assert api.calls.count("POST /v1/files") == 3
+
+
+def test_chat_json_works_with_a_reasoning_model():
+    sent: list[dict] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.read())
+        sent.append(body)
+        # Mistral Large 4 refuses greedy sampling without top_p 1 and answers
+        # in chunks: its reasoning first, then the JSON as text.
+        if body["temperature"] == 0 and body.get("top_p") != 1:
+            return httpx.Response(400, json={"message": "top_p must be 1 when using greedy sampling."})
+        content = [
+            {"type": "thinking", "thinking": [{"type": "text", "text": "The letterhead changes."}]},
+            {"type": "text", "text": '{"title": "Blutbild"}'},
+        ]
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    c = MistralClient("key", "https://api.test/v1", "ocr-model", "llm-model", max_attempts=1)
+    c._http = httpx.Client(base_url="https://api.test/v1", transport=httpx.MockTransport(api))
+
+    assert c.chat_json("system", "user", {"type": "object"}, "document_metadata") == {"title": "Blutbild"}
+    assert len(sent) == 1

@@ -254,6 +254,9 @@ class MistralClient:
         body = {
             "model": self.llm_model,
             "temperature": 0,
+            # Reasoning models such as Mistral Large 4 reject greedy sampling
+            # (temperature 0) unless top_p is exactly 1.
+            "top_p": 1,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
