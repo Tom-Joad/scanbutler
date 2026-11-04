@@ -100,3 +100,19 @@ def test_chat_json_works_with_a_reasoning_model():
 
     assert c.chat_json("system", "user", {"type": "object"}, "document_metadata") == {"title": "Blutbild"}
     assert len(sent) == 1
+
+
+def test_reasoning_effort_is_sent_only_when_set():
+    sent: list[dict] = []
+
+    def api(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.read()))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+
+    for effort in ("", "low"):
+        c = MistralClient("key", "https://api.test/v1", "ocr-model", "llm-model", reasoning_effort=effort)
+        c._http = httpx.Client(base_url="https://api.test/v1", transport=httpx.MockTransport(api))
+        c.chat_json("system", "user", {"type": "object"}, "document_metadata")
+
+    assert "reasoning_effort" not in sent[0]
+    assert sent[1]["reasoning_effort"] == "low"

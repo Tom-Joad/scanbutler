@@ -222,6 +222,7 @@ class Settings:
     api_base: str
     ocr_model: str
     llm_model: str
+    reasoning_effort: str
     request_timeout: float
     max_rps: float
 
@@ -389,6 +390,7 @@ class Settings:
             api_base=_str("MISTRAL_API_BASE", "https://api.mistral.ai/v1").rstrip("/"),
             ocr_model=_str("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
             llm_model=_str("MISTRAL_LLM_MODEL", "mistral-large-latest"),
+            reasoning_effort=_str("MISTRAL_REASONING_EFFORT", ""),
             request_timeout=_float("MISTRAL_TIMEOUT", 300.0),
             max_rps=_float("MISTRAL_MAX_RPS", 1.0),
             profiles=tuple(profiles),

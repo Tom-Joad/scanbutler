@@ -299,6 +299,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 |---|---|---|
 | `MISTRAL_API_KEY` | — | Required by inputs that call Mistral: stacks always, the scanner when it names files, a Paperless input with `TEXT_SOURCE=mistral`. See [OCR only, without Mistral](#ocr-only-without-mistral) |
 | `MISTRAL_LLM_MODEL` | `mistral-large-latest` | Model for splitting and naming |
+| `MISTRAL_REASONING_EFFORT` | — | Only for reasoning models such as `mistral-large-4-0`: `low`, `medium` or `high`. `low` is enough for splitting and naming; Mistral Large 3 rejects the setting |
 | `MISTRAL_OCR_MODEL` | `mistral-ocr-latest` | OCR model |
 | `MISTRAL_MAX_RPS` | `1` | Requests per second across all workers; set it below your account's limit |
 | `OCR_MODE` | `batch` | `batch` (half price, minutes) or `direct` (full price, seconds) |
