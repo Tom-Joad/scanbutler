@@ -7,6 +7,12 @@ layout, a changed webhook payload) only comes with a new major version.
 
 ## [Unreleased]
 
+### Added
+- `MISTRAL_REASONING_EFFORT` for reasoning models such as Mistral Large 4.
+  `low` is enough for splitting and naming and, in a test stack, took half
+  the time of the model's default. Unset, nothing is sent, as Mistral Large 3
+  rejects the parameter.
+
 ### Fixed
 - Splitting and naming also work with reasoning models such as Mistral Large
   4, which reject a temperature of 0 unless `top_p` is 1.

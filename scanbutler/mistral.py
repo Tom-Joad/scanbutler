@@ -65,6 +65,7 @@ class MistralClient:
         timeout: float = 300.0,
         max_attempts: int = 10,
         max_rps: float = 0.0,
+        reasoning_effort: str = "",
     ) -> None:
         self._http = httpx.Client(
             base_url=api_base,
@@ -73,6 +74,7 @@ class MistralClient:
         )
         self.ocr_model = ocr_model
         self.llm_model = llm_model
+        self.reasoning_effort = reasoning_effort
         self.max_attempts = max_attempts
         # Shared by all worker threads: after a 429 nobody sends until the
         # cooldown is over, instead of each thread hammering the limit alone.
@@ -266,6 +268,9 @@ class MistralClient:
                 "json_schema": {"name": name, "schema": schema, "strict": True},
             },
         }
+        # Only reasoning models accept the parameter; Large 3 rejects it.
+        if self.reasoning_effort:
+            body["reasoning_effort"] = self.reasoning_effort
         # A schema-constrained answer can still be truncated or malformed;
         # one re-ask is cheaper than failing a 500-page stack.
         for attempt in (1, 2):

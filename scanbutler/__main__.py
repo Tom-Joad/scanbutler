@@ -28,6 +28,7 @@ def _client(settings: Settings) -> MistralClient:
         settings.llm_model,
         settings.request_timeout,
         max_rps=settings.max_rps,
+        reasoning_effort=settings.reasoning_effort,
     )
 
 
