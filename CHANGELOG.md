@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.8.1] - 2026-11-05
 
 ### Changed
 - The default chat model for splitting and naming is now Mistral Large 4
