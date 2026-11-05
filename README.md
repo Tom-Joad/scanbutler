@@ -298,8 +298,8 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | Variable | Default | Purpose |
 |---|---|---|
 | `MISTRAL_API_KEY` | — | Required by inputs that call Mistral: stacks always, the scanner when it names files, a Paperless input with `TEXT_SOURCE=mistral`. See [OCR only, without Mistral](#ocr-only-without-mistral) |
-| `MISTRAL_LLM_MODEL` | `mistral-large-latest` | Model for splitting and naming |
-| `MISTRAL_REASONING_EFFORT` | — | Only for reasoning models such as `mistral-large-4-0`: `low`, `medium` or `high`. `low` is enough for splitting and naming; Mistral Large 3 rejects the setting |
+| `MISTRAL_LLM_MODEL` | `mistral-large-4-0` | Model for splitting and naming |
+| `MISTRAL_REASONING_EFFORT` | `low` for Mistral Large 4, else unset | For reasoning models: `low`, `medium` or `high`. `low` is enough for splitting and naming. Not sent unless set for other models, as Mistral Large 3 rejects it |
 | `MISTRAL_OCR_MODEL` | `mistral-ocr-latest` | OCR model |
 | `MISTRAL_MAX_RPS` | `1` | Requests per second across all workers; set it below your account's limit |
 | `OCR_MODE` | `batch` | `batch` (half price, minutes) or `direct` (full price, seconds) |
@@ -727,13 +727,18 @@ Requests for scanner and Paperless files take the next free slot, ahead of
 those for a stack.
 
 Splitting needs one request per 6 pages, and naming one request per document.
-A 500-page stack holding about 200 documents takes roughly 280 requests,
-which is about 20 minutes at 0.25 requests per second. A scanner file needs
-a single request and, with the default text source, no OCR. Every answer is
-cached in the work directory.
+A 500-page stack holding about 200 documents takes roughly 280 requests.
+Mistral Large 4 reasons before it answers, so a request takes 10 to 20
+seconds; with the default `LLM_CONCURRENCY=4` that is about 20 minutes. Its
+limits are far higher than Large 3's (16 requests per second on the account
+it was tested with), so a higher `LLM_CONCURRENCY` shortens this. A scanner
+file needs a single request and, with the default text source, no OCR. Every
+answer is cached in the work directory.
 
-At the prices published in October 2026, a 500-page stack costs about
-US$1.60: about $1.00 for batch OCR and about $0.60 for the chat model.
+At the prices published in November 2026, a 500-page stack costs about
+US$2.50 to 3: about $1.00 for batch OCR and about $1.50 to 2 for the chat
+model, most of it for the reasoning. A named scanner file costs well under a
+cent.
 Check [Mistral's pricing](https://docs.mistral.ai/inference/pricing) for
 current figures.
 

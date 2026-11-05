@@ -20,7 +20,7 @@ interface; everything it does shows up in the container log.
    | Config | `/mnt/user/appdata/scanbutler` |
    | `PUID`, `PGID` | `99`, `100` (nobody:users, like Unraid's shares) |
    | `MISTRAL_API_KEY` | your key (masked in the UI); not needed for OCR only (stacks off, `SCANNER_NAMING=off`) |
-   | `MISTRAL_LLM_MODEL` | `mistral-large-latest`, or a pinned version such as `mistral-large-2512` |
+   | `MISTRAL_LLM_MODEL` | `mistral-large-4-0` (Mistral Large 4) |
    | `MISTRAL_MAX_RPS` | a little below your account's requests-per-second limit for that model |
    | `TITLE_LANGUAGE` | e.g. `English`; leave empty to use each document's language |
    | `NO_DATE_LABEL` | the word used when a document has no date, e.g. `undated` |
