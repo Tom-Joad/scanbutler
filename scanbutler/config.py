@@ -385,12 +385,15 @@ class Settings:
         needing = [p.name for p in profiles if p.uses_mistral]
         if require_api_key and needing and not api_key:
             raise ConfigError(f"MISTRAL_API_KEY is not set; needed by: {', '.join(needing)}")
+        llm_model = _str("MISTRAL_LLM_MODEL", "mistral-large-4-0")
         return cls(
             api_key=api_key,
             api_base=_str("MISTRAL_API_BASE", "https://api.mistral.ai/v1").rstrip("/"),
             ocr_model=_str("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
-            llm_model=_str("MISTRAL_LLM_MODEL", "mistral-large-latest"),
-            reasoning_effort=_str("MISTRAL_REASONING_EFFORT", ""),
+            llm_model=llm_model,
+            # Large 4 always reasons, and low is enough here; Large 3 and most
+            # other models reject the parameter, so it is not sent for them.
+            reasoning_effort=_str("MISTRAL_REASONING_EFFORT", "low" if llm_model.startswith("mistral-large-4") else ""),
             request_timeout=_float("MISTRAL_TIMEOUT", 300.0),
             max_rps=_float("MISTRAL_MAX_RPS", 1.0),
             profiles=tuple(profiles),

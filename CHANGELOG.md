@@ -5,6 +5,18 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Changed
+- The default chat model for splitting and naming is now Mistral Large 4
+  (`mistral-large-4-0`) with `MISTRAL_REASONING_EFFORT=low`; it was
+  `mistral-large-latest`, which still points to Mistral Large 3, retired on
+  2027-04-30. Large 4 reasons before it answers: a request takes 10 to 20
+  seconds instead of 1 to 2, and the chat model costs about three times as
+  much. Its rate limits are far higher, so `MISTRAL_MAX_RPS` and
+  `LLM_CONCURRENCY` can be raised. An explicitly set `MISTRAL_LLM_MODEL`
+  keeps working as before.
+
 ## [1.8.0] - 2026-11-04
 
 ### Added

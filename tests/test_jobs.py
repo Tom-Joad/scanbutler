@@ -87,3 +87,23 @@ def test_available_cpus_respects_container_limits(monkeypatch, affinity, files, 
     monkeypatch.setattr(config, "Path", FakeCgroup)
     monkeypatch.setattr(config.os, "sched_getaffinity", lambda pid: set(range(affinity)))
     assert config.available_cpus() == cpus
+
+
+@pytest.mark.parametrize(
+    ("model", "effort", "expected"),
+    [
+        (None, None, ("mistral-large-4-0", "low")),
+        ("mistral-large-2512", None, ("mistral-large-2512", "")),
+        ("mistral-large-4", None, ("mistral-large-4", "low")),
+        ("mistral-large-4-0", "high", ("mistral-large-4-0", "high")),
+    ],
+)
+def test_reasoning_effort_defaults_to_low_for_large_4_only(monkeypatch, model, effort, expected):
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    for name, value in (("MISTRAL_LLM_MODEL", model), ("MISTRAL_REASONING_EFFORT", effort)):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    settings = Settings.from_env()
+    assert (settings.llm_model, settings.reasoning_effort) == expected
