@@ -10,9 +10,12 @@ LABEL org.opencontainers.image.source="https://github.com/Tom-Joad/scanbutler" \
       org.opencontainers.image.description="Turn scanned paper into named, searchable PDFs: split stacks by content, name scanner files, feed Paperless-ngx" \
       org.opencontainers.image.licenses="MIT"
 
+# S6_BEHAVIOUR_IF_STAGE2_FAILS: a failing init step stops the container
+# instead of leaving it running half set up.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    S6_BEHAVIOUR_IF_STAGE2_FAILS=2
 
 # Tesseract and Ghostscript power the searchable text layer; unpaper backs
 # ocrmypdf's --clean. The upgrade picks up Debian security fixes newer than
