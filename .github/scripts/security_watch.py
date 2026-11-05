@@ -799,11 +799,19 @@ def new_changelog(text, lines, repo, updates=()):
         text = text[:unrel.start()] + entry + text[unrel.end():]
     else:
         text = text[:m.start()] + entry + text[m.start():]
-    link = re.search(rf"^\[{re.escape(old)}\]: \S+$", text, re.M)
-    if link:
+    # Link definitions go newest first, above the previous version's. When
+    # that one is missing, the topmost one marks the place; looking only for
+    # the previous version's link stopped all later links once one was gone
+    # (scanbutler from 1.6.1, wol-relay-container from 1.0.2).
+    if bracket:
         url = (f"https://github.com/{repo}/compare/"
                f"{TAG_PREFIX}{old}...{TAG_PREFIX}{new}")
-        text = text[:link.start()] + f"[{new}]: {url}\n" + text[link.start():]
+        link = (re.search(rf"^\[{re.escape(old)}\]: \S+$", text, re.M)
+                or re.search(r"^\[\d[^\]]*\]: \S+$", text, re.M))
+        if link:
+            text = text[:link.start()] + f"[{new}]: {url}\n" + text[link.start():]
+        else:
+            text = text.rstrip("\n") + f"\n\n[{new}]: {url}\n"
     return text, old, new, body.strip()
 
 

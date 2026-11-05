@@ -5,6 +5,12 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Changed
+- A start-up step that fails now stops the container instead of leaving it
+  running half set up, as in the other images.
+
 ## [1.8.1] - 2026-11-05
 
 ### Changed
@@ -513,11 +519,16 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.8.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.8.0...v1.8.1
+[1.8.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.7.5...v1.8.0
+[1.7.5]: https://github.com/Tom-Joad/scanbutler/compare/v1.7.4...v1.7.5
+[1.7.4]: https://github.com/Tom-Joad/scanbutler/compare/v1.7.3...v1.7.4
+[1.7.3]: https://github.com/Tom-Joad/scanbutler/compare/v1.7.2...v1.7.3
+[1.7.2]: https://github.com/Tom-Joad/scanbutler/compare/v1.7.1...v1.7.2
+[1.7.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.6.2...v1.7.0
 [1.6.2]: https://github.com/Tom-Joad/scanbutler/compare/v1.6.1...v1.6.2
-[1.2.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/Tom-Joad/scanbutler/releases/tag/v1.0.0
+[1.6.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.4.2...v1.5.0
