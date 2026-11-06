@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.8.2] - 2026-11-06
 
 ### Changed
 - A start-up step that fails now stops the container instead of leaving it
@@ -519,6 +519,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.8.2]: https://github.com/Tom-Joad/scanbutler/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.7.5...v1.8.0
 [1.7.5]: https://github.com/Tom-Joad/scanbutler/compare/v1.7.4...v1.7.5
