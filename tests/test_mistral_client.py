@@ -116,3 +116,36 @@ def test_reasoning_effort_is_sent_only_when_set():
 
     assert "reasoning_effort" not in sent[0]
     assert sent[1]["reasoning_effort"] == "low"
+
+
+def test_rate_file_spaces_requests_across_clients(tmp_path):
+    """Two clients (as in two processes) share one MISTRAL_MAX_RPS through the file."""
+    import time as clock
+
+    from scanbutler.mistral import MistralClient
+
+    rate = tmp_path / "api" / "mistral.rate"
+    clients = [MistralClient("k", "http://x", "ocr", "llm", max_rps=10, rate_file=rate) for _ in range(2)]
+    started = clock.monotonic()
+    for _ in range(3):
+        for client in clients:
+            client._wait_for_cooldown()
+    # Six requests at 10 per second: at least five intervals of 0.1 s.
+    assert clock.monotonic() - started >= 0.45
+    assert float(rate.read_text()) > 0
+    for client in clients:
+        client.close()
+
+
+def test_stale_rate_file_does_not_stall(tmp_path):
+    import time as clock
+
+    from scanbutler.mistral import MistralClient
+
+    rate = tmp_path / "mistral.rate"
+    rate.write_text(str(clock.time() + 3600))  # e.g. after a clock jump
+    client = MistralClient("k", "http://x", "ocr", "llm", max_rps=10, rate_file=rate)
+    started = clock.monotonic()
+    client._wait_for_cooldown()
+    assert clock.monotonic() - started < 0.5
+    client.close()

@@ -30,7 +30,13 @@ def _client(settings: Settings) -> MistralClient:
         settings.request_timeout,
         max_rps=settings.max_rps,
         reasoning_effort=settings.reasoning_effort,
+        rate_file=rate_file(settings) if settings.api_enabled else None,
     )
+
+
+def rate_file(settings: Settings) -> Path:
+    """The request slots shared with the API's OCR processes."""
+    return settings.work_dir / "api" / "mistral.rate"
 
 
 def prepare_tmpdir(work_dir: Path) -> None:

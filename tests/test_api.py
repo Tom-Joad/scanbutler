@@ -211,6 +211,28 @@ def test_image_to_pdf_upright(tmp_path):
         assert float(box[3]) > float(box[2])  # portrait after the EXIF turn
 
 
+@pytest.mark.parametrize(
+    "size, dpi, expected",
+    [
+        ((4000, 3000), (72, 72), 4000 / 11.7),  # phone photo: 72 dpi means nothing
+        ((4000, 3000), None, 4000 / 11.7),
+        ((2480, 3508), (300, 300), 300),  # an A4 scan at 300 dpi
+        ((1000, 800), (96, 96), 150),  # small and low: at least 150
+    ],
+)
+def test_image_resolution(tmp_path, size, dpi, expected):
+    import pikepdf
+
+    src = tmp_path / "in.png"
+    Image.new("L", size, 255).save(src, dpi=dpi) if dpi else Image.new("L", size, 255).save(src)
+    dst = tmp_path / "out.pdf"
+    api.image_to_pdf(src, dst)
+    with pikepdf.open(dst) as pdf:
+        box = pdf.pages[0].mediabox
+        long_side_pt = max(float(box[2]), float(box[3]))
+    assert long_side_pt / 72 == pytest.approx(max(size) / expected, rel=0.01)
+
+
 def test_sniff():
     assert api.sniff(b"%PDF-1.4") == "pdf"
     assert api.sniff(b"\xff\xd8\xff\xe0") == "jpg"
@@ -219,3 +241,9 @@ def test_sniff():
     buffer = io.BytesIO()
     Image.new("L", (10, 10)).save(buffer, "PNG")
     assert api.sniff(buffer.getvalue()[:16]) == "png"
+
+
+def test_mistral_errors_from_page_records(tmp_path):
+    (tmp_path / "page-0001.json").write_text('{"page": 1, "image": "x", "lines_replaced": 2}')
+    (tmp_path / "page-0002.json").write_text('{"page": 2, "error": "/ocr: HTTP 401"}')
+    assert api.mistral_errors(tmp_path) == [(2, "/ocr: HTTP 401")]

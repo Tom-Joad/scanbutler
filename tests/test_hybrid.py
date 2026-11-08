@@ -160,3 +160,34 @@ def test_words_outside_blocks_stay():
     merged, _ = hybrid.merge(tree, blocks)
     assert hybrid.text_of(merged).startswith("Zutaten: 500 g Mehl\n")
     assert "Ei@r" not in hybrid.text_of(merged)
+
+
+def area(*lines):
+    """A Tesseract content area with one paragraph, framed like its lines."""
+    par = OcrElement(ocr_class=OcrClass.PARAGRAPH, bbox=lines[0].bbox, children=list(lines))
+    return OcrElement(ocr_class=OcrClass.CAREA, bbox=lines[0].bbox, children=[par])
+
+
+def test_replaced_block_keeps_its_place_in_the_text():
+    # Printed head and foot, handwriting between them, each in its own area
+    # as Tesseract returns them.
+    head = line(word("Rezept", 100, 100, 300, 140))
+    hand = line(word("Ei@r", 100, 300, 200, 350), word("vcrq;", 210, 300, 330, 350))
+    foot = line(word("Seite", 100, 900, 200, 940), word("2", 210, 900, 230, 940))
+    tree = OcrElement(ocr_class=OcrClass.PAGE, bbox=BoundingBox(0, 0, 1000, 1000), children=[area(head), area(hand), area(foot)])
+    blocks = hybrid.blocks_from_page({"blocks": [block("text", 90, 90, 400, 150, "Rezept"),
+                                                 block("text", 90, 290, 600, 360, "Eier verquirlen"),
+                                                 block("text", 90, 890, 400, 950, "Seite 2")]}, 1000, 1000)
+    merged, _ = hybrid.merge(tree, blocks)
+    assert hybrid.text_of(merged) == "Rezept\nEier verquirlen\nSeite 2\n"
+    # The renderer walks paragraphs; none may sit inside another one.
+    assert all(c.ocr_class != OcrClass.PARAGRAPH for p in merged.paragraphs for c in p.children)
+
+
+def test_stripes_go_in_by_height():
+    head = line(word("Rezept", 100, 100, 300, 140))
+    foot = line(word("Seite", 100, 900, 200, 940), word("2", 210, 900, 230, 940))
+    tree = OcrElement(ocr_class=OcrClass.PAGE, bbox=BoundingBox(0, 0, 1000, 1000), children=[area(head), area(foot)])
+    blocks = hybrid.blocks_from_page({"blocks": [block("text", 100, 500, 900, 600, "nur Mistral")]}, 1000, 1000)
+    merged, _ = hybrid.merge(tree, blocks)
+    assert hybrid.text_of(merged) == "Rezept\nnur Mistral\nSeite 2\n"
