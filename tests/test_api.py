@@ -247,3 +247,55 @@ def test_mistral_errors_from_page_records(tmp_path):
     (tmp_path / "page-0001.json").write_text('{"page": 1, "image": "x", "lines_replaced": 2}')
     (tmp_path / "page-0002.json").write_text('{"page": 2, "error": "/ocr: HTTP 401"}')
     assert api.mistral_errors(tmp_path) == [(2, "/ocr: HTTP 401")]
+
+
+def test_delete_and_worker_dont_race(setup):
+    settings, jobs, tokens, client = setup
+    token = tokens.add("cookbutler")
+    job = client.post("/api/v1/jobs", headers=auth(token), content=PDF).json()
+    # The program deletes the job right after the worker listed it as queued.
+    assert jobs.delete_unless_running(job["id"])
+    assert jobs.claim(job["id"]) is None
+    ran = []
+    worker = api.Worker(jobs, settings, threading.Event(), run=lambda *a: ran.append(a) or 1, notify=lambda j: None)
+    assert not worker.run_one()
+    assert ran == []
+    # Once claimed, a job can't be deleted until it is done.
+    other = client.post("/api/v1/jobs", headers=auth(token), content=PDF).json()
+    assert jobs.claim(other["id"])["status"] == "running"
+    assert client.delete(f"/api/v1/jobs/{other['id']}", headers=auth(token)).status_code == 409
+    assert jobs.folder(other["id"]).exists()
+
+
+def test_clean_removes_crash_leftovers(setup):
+    import os
+    import time as clock
+
+    settings, jobs, tokens, client = setup
+    token = tokens.add("cookbutler")
+    job = client.post("/api/v1/jobs", headers=auth(token), content=PDF).json()
+    jobs.root.mkdir(parents=True, exist_ok=True)
+    upload = jobs.root / ".upload-0123456789abcdef"
+    upload.write_bytes(b"half a file")
+    half = jobs.root / ("f" * 32)
+    half.mkdir()
+    (half / "input.pdf").write_bytes(PDF)
+    fresh = jobs.root / ".upload-fedcba9876543210"
+    fresh.write_bytes(b"still arriving")
+    old = clock.time() - 2 * 3600
+    for path in (upload, half):
+        os.utime(path, (old, old))
+    api.Worker(jobs, settings, threading.Event()).clean()
+    assert not upload.exists() and not half.exists()
+    assert fresh.exists()  # an upload in progress stays
+    assert jobs.folder(job["id"]).exists()  # a real job stays
+
+
+def test_result_hours_has_a_floor(monkeypatch, tmp_path):
+    from scanbutler.config import ConfigError
+
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    monkeypatch.setenv("API_RESULT_HOURS", "0")
+    with pytest.raises(ConfigError, match="API_RESULT_HOURS"):
+        Settings.from_env()

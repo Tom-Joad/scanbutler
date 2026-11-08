@@ -23,6 +23,7 @@ from typing import Annotated
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 from PIL import Image, ImageOps
 
 from . import __version__, logging_setup, pdfops, priority
@@ -44,6 +45,7 @@ _MAGIC = [
     (b"MM\x00*", "tif"),
 ]
 CALLBACK_DELAYS = (2, 5)
+LEFTOVER_SECONDS = 3600
 MAX_PAGE_INCHES = 16.5
 
 
@@ -152,6 +154,48 @@ class Jobs:
 
     def delete(self, job_id: str) -> None:
         shutil.rmtree(self.folder(job_id), ignore_errors=True)
+
+    def claim(self, job_id: str) -> dict | None:
+        """Mark a queued job running; None if it was deleted or taken meanwhile."""
+        with self._lock:
+            try:
+                job = self.read(job_id)
+            except KeyError:
+                return None
+            if job["status"] != "queued":
+                return None
+            job.update(status="running", started_at=_now())
+            self.write(job)
+            return job
+
+    def delete_unless_running(self, job_id: str) -> bool:
+        """Delete a job unless the worker has it; under the lock the worker claims with."""
+        with self._lock:
+            if self.read(job_id)["status"] == "running":
+                return False
+            self.delete(job_id)
+            return True
+
+    def leftovers(self, older_than: float) -> list[Path]:
+        """Uploads and job folders a crash left half made (no job.json), older than `older_than` (epoch)."""
+        found = []
+        if not self.root.exists():
+            return found
+        for path in self.root.iterdir():
+            try:
+                if path.stat().st_mtime >= older_than:
+                    continue
+            except OSError:
+                continue
+            if path.name.startswith(".upload-") or (path.is_dir() and not (path / "job.json").exists()):
+                found.append(path)
+        return found
+
+
+def _size(path: Path) -> int:
+    if path.is_file():
+        return path.stat().st_size
+    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
 def public(job: dict) -> dict:
@@ -277,14 +321,26 @@ class Worker:
         for job in self.jobs.all():
             finished = job.get("finished_at")
             if finished and now - datetime.fromisoformat(finished.replace("Z", "+00:00")) > keep:
+                freed = _size(self.jobs.folder(job["id"]))
                 self.jobs.delete(job["id"])
-                log.info("api job removed", extra={"job": job["id"], "reason": "expired"})
+                log.info("api job removed", extra={"job": job["id"], "reason": "expired", "freed_mb": round(freed / 2**20, 1)})
+        # A crash during an upload, or between creating a job's folder and
+        # its job.json, leaves files nothing else would ever remove.
+        for path in self.jobs.leftovers(now.timestamp() - LEFTOVER_SECONDS):
+            freed = _size(path)
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                path.unlink(missing_ok=True)
+            log.info("api leftover removed", extra={"name": path.name, "freed_mb": round(freed / 2**20, 1)})
 
     def run_one(self) -> bool:
         queued = [j for j in self.jobs.all() if j["status"] == "queued"]
         if not queued:
             return False
-        job = self.jobs.update(queued[0]["id"], status="running", started_at=_now())
+        job = self.jobs.claim(queued[0]["id"])
+        if job is None:  # deleted by its program just now
+            return True
         started = time.monotonic()
         log.info("api job started", extra={"job": job["id"], "owner": job["owner"], "kind": job["kind"]})
         try:
@@ -364,25 +420,30 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
                 raise HTTPException(400, "invalid Content-Length")
             if int(declared) > limit:
                 raise HTTPException(413, f"the file is larger than {settings.api_max_upload_mb} MB")
-        jobs.root.mkdir(parents=True, exist_ok=True)
+        # File work runs in a thread: a slow disk must not hold up the event
+        # loop, and with it every other request.
+        await run_in_threadpool(jobs.root.mkdir, parents=True, exist_ok=True)
         upload = jobs.root / f".upload-{secrets.token_hex(8)}"
         size, head = 0, b""
         try:
-            with upload.open("wb") as out:
+            out = await run_in_threadpool(upload.open, "wb")
+            try:
                 async for chunk in request.stream():
                     if len(head) < 16:
                         head += chunk[: 16 - len(head)]
                     size += len(chunk)
                     if size > limit:
                         raise HTTPException(413, f"the file is larger than {settings.api_max_upload_mb} MB")
-                    out.write(chunk)
+                    await run_in_threadpool(out.write, chunk)
+            finally:
+                await run_in_threadpool(out.close)
             kind = sniff(head)
             if kind is None:
                 raise HTTPException(415, "send a PDF, JPEG, PNG, TIFF or WebP file")
             filename = Path(filename.strip() or f"upload.{kind}").name[:200] or f"upload.{kind}"
-            job = jobs.create(name, filename, kind, upload, callback_url)
+            job = await run_in_threadpool(jobs.create, name, filename, kind, upload, callback_url)
         finally:
-            upload.unlink(missing_ok=True)
+            await run_in_threadpool(upload.unlink, missing_ok=True)
         log.info("api job queued", extra={"job": job["id"], "owner": name, "kind": kind, "bytes": size})
         return JSONResponse(public(job), status_code=202, headers={"Location": f"/api/v1/jobs/{job['id']}"})
 
@@ -399,28 +460,28 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
     def status(job_id: str, name: Caller):
         return public(own(job_id, name))
 
-    def result(job_id: str, name: str, file: str) -> Path:
+    def result(job_id: str, name: str) -> dict:
         job = own(job_id, name)
         if job["status"] != "done":
             raise HTTPException(409, f"the job is {job['status']}")
-        return jobs.folder(job_id) / file
+        return job
 
     @app.get("/api/v1/jobs/{job_id}/result.pdf")
     def result_pdf(job_id: str, name: Caller):
-        job = own(job_id, name)
+        job = result(job_id, name)
         stem = Path(job["filename"]).stem or "result"
-        return FileResponse(result(job_id, name, "result.pdf"), media_type="application/pdf", filename=f"{stem}.pdf")
+        return FileResponse(jobs.folder(job_id) / "result.pdf", media_type="application/pdf", filename=f"{stem}.pdf")
 
     @app.get("/api/v1/jobs/{job_id}/result.json")
     def result_json(job_id: str, name: Caller):
-        return FileResponse(result(job_id, name, "result.json"), media_type="application/json")
+        result(job_id, name)
+        return FileResponse(jobs.folder(job_id) / "result.json", media_type="application/json")
 
     @app.delete("/api/v1/jobs/{job_id}", status_code=204)
     def delete(job_id: str, name: Caller):
-        job = own(job_id, name)
-        if job["status"] == "running":
+        own(job_id, name)
+        if not jobs.delete_unless_running(job_id):
             raise HTTPException(409, "the job is running; delete it when it is done")
-        jobs.delete(job_id)
         log.info("api job removed", extra={"job": job_id, "reason": "deleted"})
         return Response(status_code=204)
 
