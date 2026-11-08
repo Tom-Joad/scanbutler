@@ -461,7 +461,7 @@ class Settings:
             queue_webhook_url=os.environ.get("QUEUE_WEBHOOK_URL", "").strip(),
             queue_webhook_check_seconds=_int("QUEUE_WEBHOOK_CHECK_SECONDS", 10, minimum=1),
             queue_webhook_heartbeat_seconds=_int("QUEUE_WEBHOOK_HEARTBEAT_SECONDS", 300, minimum=10),
-            work_retention_days=max(0.0, _float("WORK_RETENTION_DAYS", 30.0)),
+            work_retention_days=float(_int("WORK_RETENTION_DAYS", 30, minimum=0)),
             log_level=_str("LOG_LEVEL", "INFO"),
             api_enabled=api_enabled,
             api_port=_int("API_PORT", 8080, minimum=1),

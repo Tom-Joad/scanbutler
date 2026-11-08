@@ -126,3 +126,48 @@ def test_settings_repr_has_no_secrets(monkeypatch):
 
     hidden = {f.name for f in dataclasses.fields(Settings) if not f.repr}
     assert {"api_key", "paperless_token"} <= hidden
+
+
+def test_bad_setting_is_logged_as_config_invalid(monkeypatch, capsys, tmp_path):
+    import json as _json
+
+    from scanbutler.__main__ import main
+
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.setenv("OCR_MODE", "sometimes")
+    assert main(["run"]) == 2
+    line = _json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert line["event"] == "config_invalid" and "OCR_MODE" in line["reason"]
+
+
+def test_log_time_is_local_with_offset(monkeypatch):
+    import logging
+    import time as _time
+
+    from scanbutler.logging_setup import JsonFormatter
+
+    monkeypatch.setenv("TZ", "Europe/Berlin")
+    _time.tzset()
+    try:
+        record = logging.LogRecord("x", logging.INFO, __file__, 1, "starting", None, None)
+        record.created = 1793000000.0  # winter: UTC+1
+        ts = __import__("json").loads(JsonFormatter().format(record))["ts"]
+        assert ts.endswith("+01:00")
+    finally:
+        monkeypatch.delenv("TZ")
+        _time.tzset()
+
+
+def test_work_retention_days_is_a_whole_number(monkeypatch, tmp_path):
+    import pytest as _pytest
+
+    from scanbutler.config import ConfigError, Settings
+
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    for bad in ("7.5", "-1"):
+        monkeypatch.setenv("WORK_RETENTION_DAYS", bad)
+        with _pytest.raises(ConfigError, match="WORK_RETENTION_DAYS"):
+            Settings.from_env()
+    monkeypatch.setenv("WORK_RETENTION_DAYS", "0")
+    assert Settings.from_env().work_retention_days == 0

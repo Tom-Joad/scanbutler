@@ -1,8 +1,8 @@
 services:
   scanbutler:
-    build: .
-    # Published images can be used instead of a local build:
-    # image: ghcr.io/tom-joad/scanbutler:latest
+    image: ghcr.io/tom-joad/scanbutler:latest
+    # Or build from this checkout instead:
+    # build: .
     container_name: scanbutler
     restart: unless-stopped
 

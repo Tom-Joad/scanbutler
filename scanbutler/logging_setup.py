@@ -16,7 +16,7 @@ import logging
 import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import datetime, timezone
+from datetime import datetime
 
 _RESERVED = frozenset(logging.LogRecord("", 0, "", 0, "", None, None).__dict__)
 
@@ -40,7 +40,9 @@ class JsonFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         payload = {
-            "ts": datetime.fromtimestamp(record.created, timezone.utc)
+            # Local time with UTC offset; TZ selects the zone, UTC prints as Z.
+            "ts": datetime.fromtimestamp(record.created)
+            .astimezone()
             .isoformat(timespec="milliseconds")
             .replace("+00:00", "Z"),
             "level": record.levelname,
