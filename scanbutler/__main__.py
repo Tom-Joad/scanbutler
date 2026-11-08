@@ -145,7 +145,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         settings = Settings.from_env(require_api_key=command != "rebuild")
     except ConfigError as exc:
-        print(f"configuration error: {exc}", file=sys.stderr)
+        # A JSON line like every other; LOG_LEVEL itself may be what's wrong.
+        logging_setup.configure("INFO")
+        log.error("config_invalid", extra={"reason": str(exc)})
         return 2
     logging_setup.configure(settings.log_level)
     pdfops.configure_jobs(settings.ocrmypdf_jobs)

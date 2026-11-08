@@ -5,6 +5,22 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Changed
+- Log times are in the container's time zone (`TZ`) with their offset, as
+  in the other images; UTC still prints as `Z`.
+- A bad setting is logged as a JSON line, event `config_invalid` with the
+  `reason`, instead of a plain `configuration error:` line.
+- `WORK_RETENTION_DAYS` must be a whole number of days, 0 or more; other
+  values stop the container with `config_invalid` instead of being rounded
+  or treated as 0.
+- The example compose file uses the published image; building from the
+  checkout is the commented alternative.
+
+### Docs
+- README: supported architectures and image tags.
+
 ## [1.9.0] - 2026-11-08
 
 ### Added

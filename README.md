@@ -61,6 +61,7 @@ Under the hood:
 
 ## Contents
 
+- [Supported architectures and tags](#supported-architectures-and-tags)
 - [System requirements](#system-requirements)
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
@@ -77,6 +78,24 @@ Under the hood:
 - [Unraid](#unraid)
 - [Development](#development)
 - [Contributing](#contributing)
+
+## Supported architectures and tags
+
+| Architecture | Available |
+| :---: | :---: |
+| x86-64 | ✅ |
+| arm64 | ✅ |
+
+One image for both: Docker picks the right one.
+
+| Tag | Meaning |
+|---|---|
+| `latest` | The latest release |
+| `1.9.0`, `1.9` | A specific release / the latest patch of a minor version |
+| `sha-<commit>` | A specific build |
+
+Images are built by GitHub Actions for every version tag, published to
+`ghcr.io/tom-joad/scanbutler` and signed keylessly with Sigstore.
 
 ## System requirements
 

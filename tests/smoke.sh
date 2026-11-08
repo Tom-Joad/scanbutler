@@ -69,10 +69,10 @@ grep -q '"input_streams_unreadable"' <<<"$text" || fail "no warning about the un
 echo "== without MISTRAL_API_KEY the watcher reports a configuration error"
 docker run -d --name "$NAME" "$IMAGE" >/dev/null
 for _ in $(seq 1 30); do
-    in_log 'configuration error: MISTRAL_API_KEY' && break
+    in_log '"event":"config_invalid","reason":"MISTRAL_API_KEY' && break
     sleep 1
 done
-in_log 'configuration error: MISTRAL_API_KEY' || fail "no configuration error without MISTRAL_API_KEY"
+in_log '"event":"config_invalid","reason":"MISTRAL_API_KEY' || fail "no configuration error without MISTRAL_API_KEY"
 docker rm -f "$NAME" >/dev/null
 
 echo "== OCR only: no key needed with the stacks off and SCANNER_NAMING=off"
@@ -82,7 +82,7 @@ for _ in $(seq 1 60); do
     sleep 1
 done
 in_log '"event":"starting"' || fail "no start without a key in OCR-only mode"
-if in_log 'configuration error'; then fail "configuration error in OCR-only mode"; fi
+if in_log '"event":"config_invalid"'; then fail "configuration error in OCR-only mode"; fi
 docker rm -f "$NAME" >/dev/null
 
 echo "== a misspelt language is a configuration error"
@@ -91,7 +91,7 @@ for _ in $(seq 1 30); do
     in_log "did you mean 'deu'" && break
     sleep 1
 done
-in_log "configuration error: OCRMYPDF_LANGUAGES: unknown language 'ger' \(did you mean 'deu'\?\)" \
+in_log "\"event\":\"config_invalid\",\"reason\":\"OCRMYPDF_LANGUAGES: unknown language 'ger' \\(did you mean 'deu'\\?\\)" \
     || fail "no configuration error for OCRMYPDF_LANGUAGES=deu+ger"
 docker rm -f "$NAME" >/dev/null
 
@@ -176,11 +176,14 @@ done
 
 echo "== the API returns a searchable PDF with Mistral's text where Tesseract read nothing"
 docker rm -f "$NAME" >/dev/null
-docker run -d --name "$NAME" -e PUID="$PUID" -e PGID="$PGID" -e API_ENABLED=true -e MISTRAL_API_KEY="$SECRET" \
-    -e MISTRAL_API_BASE=http://127.0.0.1:8999 -e STACKS_ENABLED=false -e SCANNER_ENABLED=false \
-    -e OCRMYPDF_LANGUAGES=deu -v "$TESTS:/tests:ro" "$IMAGE" >/dev/null
-docker exec -d "$NAME" python3 /tests/fake_mistral.py
-for _ in $(seq 60); do in_log '"event":"api listening"' && break; sleep 1; done
+start_api() {
+    docker run -d --name "$NAME" -e PUID="$PUID" -e PGID="$PGID" -e API_ENABLED=true -e MISTRAL_API_KEY="$SECRET" \
+        -e MISTRAL_API_BASE=http://127.0.0.1:8999 -e STACKS_ENABLED=false -e SCANNER_ENABLED=false \
+        -e OCRMYPDF_LANGUAGES=deu -v "$TESTS:/tests:ro" -v "$WORK/api-config:/config" "$IMAGE" >/dev/null
+    docker exec -d "$NAME" python3 /tests/fake_mistral.py
+    for _ in $(seq 60); do in_log '"event":"api listening"' && break; sleep 1; done
+}
+start_api
 in_log '"event":"api has no token yet' || fail "no warning about the missing token"
 token=$(docker exec "$NAME" scanbutler token add smoke) || fail "token add failed"
 [[ $token == sb_* ]] || fail "unexpected token: $token"
@@ -189,11 +192,24 @@ for _ in $(seq 40); do docker exec "$NAME" test -f /tmp/scanbutler.heartbeat && 
 docker exec "$NAME" python3 -m scanbutler.health || fail "health check fails with the API on"
 text=$(docker exec "$NAME" python3 /tests/api_roundtrip.py "$token" 2>&1) || fail "api round trip: $text"
 grep -q "Zimtschnecken" <<<"$text" || fail "the result's text layer lacks Mistral's text: $text"
-[[ $(stat -c %u "$WORK/config/api/tokens.json" 2>/dev/null || docker exec "$NAME" stat -c %u /config/api/tokens.json) == "$PUID" ]] \
+[[ $(stat -c %u "$WORK/api-config/api/tokens.json") == "$PUID" ]] \
     || fail "tokens.json not owned by PUID"
 [[ $(docker exec "$NAME" stat -c %a /config/api/tokens.json) == 600 ]] || fail "tokens.json readable by others"
 if docker exec "$NAME" grep -rqs "$token" /config /tmp /app; then fail "the API token was written to a file"; fi
 if in_log "$token"; then fail "the API token is in the log"; fi
+
+echo "== the token and a finished job survive a re-created container"
+kept=$(docker exec "$NAME" python3 /tests/api_roundtrip.py "$token" keep 2>&1) || fail "api round trip: $kept"
+job=$(tail -n 1 <<<"$kept")
+docker rm -f "$NAME" >/dev/null
+start_api
+for _ in $(seq 40); do docker exec "$NAME" test -f /tmp/scanbutler.heartbeat && break; sleep 1; done
+status=$(docker exec "$NAME" python3 -c "
+import sys, httpx
+answer = httpx.get('http://127.0.0.1:8080/api/v1/jobs/' + sys.argv[2], headers={'Authorization': 'Bearer ' + sys.argv[1]})
+print(answer.status_code, answer.json().get('status'))
+" "$token" "$job" 2>&1) || fail "job lookup after re-create: $status"
+[[ $status == "200 done" ]] || fail "after re-creating the container the job says: $status"
 
 echo "== a page Mistral refuses fails the job after one request, not one per ocrmypdf mode"
 docker exec "$NAME" sh -c 'rm -f /tmp/fake-mistral-calls; touch /tmp/fake-mistral-refuse'

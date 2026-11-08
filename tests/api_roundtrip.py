@@ -1,8 +1,9 @@
 """Smoke test of the API from inside the container: send a scribbled page
 image, wait for the job, and print the result PDF's text layer.
 
-Usage: api_roundtrip.py TOKEN [refused]
-With "refused" the job must fail with Mistral's error instead.
+Usage: api_roundtrip.py TOKEN [refused|keep]
+With "refused" the job must fail with Mistral's error instead; with "keep"
+the job is kept and its id printed last.
 """
 
 import io
@@ -16,6 +17,7 @@ from PIL import Image, ImageDraw
 
 token = sys.argv[1]
 refused = sys.argv[2:] == ["refused"]
+keep = sys.argv[2:] == ["keep"]
 # The API's links are paths from the server root, like /api/v1/jobs/ID.
 api = httpx.Client(base_url="http://127.0.0.1:8080", headers={"Authorization": f"Bearer {token}"})
 
@@ -52,4 +54,7 @@ assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
 result = api.get(job["links"]["json"]).json()
 assert result["pages"][0]["lines_from_mistral"] == 1, result
 print(pypdfium2.PdfDocument(pdf.content)[0].get_textpage().get_text_range())
+if keep:
+    print(job["id"])
+    sys.exit(0)
 assert api.delete(job["links"]["self"]).status_code == 204
