@@ -283,6 +283,7 @@ Debian base and behaves like their containers: it starts as root, gives the
 
 | Parameter | Default | Purpose |
 |---|---|---|
+| `-p 8080` | | The HTTP API, only with `API_ENABLED=true` (see [HTTP API](#http-api)) |
 | `-e PUID` | `911` | User ID that owns new files; use the owner of your data folder (Unraid: `99`) |
 | `-e PGID` | `911` | Group ID for new files (Unraid: `100`) |
 | `-e UMASK` | `022` | Permission mask for new files; `002` makes them writable for the group |
@@ -386,7 +387,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 |---|---|---|
 | `API_ENABLED` | `false` | `true` starts the API on port 8080 in the container |
 | `API_MAX_UPLOAD_MB` | `100` | Largest file the API accepts |
-| `API_RESULT_HOURS` | `24` | Hours a finished job and its results are kept |
+| `API_RESULT_HOURS` | `24` | Hours a finished job and its results are kept (at least 1) |
 
 **Throughput, webhook and logging**
 

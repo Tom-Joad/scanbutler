@@ -385,6 +385,10 @@ class Settings:
             if profile.text_source == "tesseract" and not profile.upload and not _bool("OCRMYPDF_ENABLED", True):
                 raise ConfigError(f"{profile.env_prefix}_TEXT_SOURCE=tesseract needs OCRMYPDF_ENABLED=true")
         api_enabled = _bool("API_ENABLED", False)
+        result_hours = _float("API_RESULT_HOURS", 24.0)
+        if result_hours < 1:
+            # Less would remove results before a program polling now and then fetches them.
+            raise ConfigError(f"API_RESULT_HOURS must be at least 1, got {result_hours}")
         if not profiles and not api_enabled:
             raise ConfigError("STACKS_ENABLED and SCANNER_ENABLED are both off")
         if api_enabled and not _bool("OCRMYPDF_ENABLED", True):
@@ -462,7 +466,7 @@ class Settings:
             api_enabled=api_enabled,
             api_port=_int("API_PORT", 8080, minimum=1),
             api_max_upload_mb=_int("API_MAX_UPLOAD_MB", 100, minimum=1),
-            api_result_hours=_float("API_RESULT_HOURS", 24.0),
+            api_result_hours=result_hours,
         )
 
     @property
