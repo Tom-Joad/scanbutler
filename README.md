@@ -757,15 +757,16 @@ apply without a restart. A program sees only the jobs it created.
 
 | Request | Answer |
 |---|---|
-| `POST /api/v1/jobs` (multipart: `file`, optional `callback_url`) | `202`, the job with its `id` |
+| `POST /api/v1/jobs?filename=…&callback_url=…` with the file as the body | `202`, the job with its `id` |
 | `GET /api/v1/jobs` | the program's jobs |
 | `GET /api/v1/jobs/{id}` | `status`: `queued`, `running`, `done` or `failed` (with `error`) |
 | `GET /api/v1/jobs/{id}/result.pdf` | the searchable PDF (`409` until `done`) |
 | `GET /api/v1/jobs/{id}/result.json` | per page: `text` (the text layer), `markdown` (Mistral's reading, with headings and lists), `blocks_from_mistral` |
 | `DELETE /api/v1/jobs/{id}` | `204`; removes the job and its files at once |
 
-`file` is a PDF, JPEG, PNG, TIFF or WebP. Photos are turned upright by
-their orientation tag. With `callback_url`, Scanbutler posts
+The body is the file itself (no form encoding): a PDF, JPEG, PNG, TIFF or
+WebP. Both query parameters are optional; `filename` names the result.
+Photos are turned upright by their orientation tag. With `callback_url`, Scanbutler posts
 `{"id", "status": "ok"|"failed", "message", "links"}` there when the job is
 finished; the program then fetches the results with its token. Jobs run one
 after the other, ahead of stacks waiting for OCR, and survive a restart.
@@ -773,7 +774,8 @@ Finished jobs are removed after `API_RESULT_HOURS`.
 
 ```bash
 TOKEN=sb_...
-curl -H "Authorization: Bearer $TOKEN" -F file=@recipe.jpg http://NAS-IP:8080/api/v1/jobs
+curl -H "Authorization: Bearer $TOKEN" --data-binary @recipe.jpg \
+     "http://NAS-IP:8080/api/v1/jobs?filename=recipe.jpg"
 curl -H "Authorization: Bearer $TOKEN" http://NAS-IP:8080/api/v1/jobs/ID
 curl -H "Authorization: Bearer $TOKEN" -o recipe.pdf http://NAS-IP:8080/api/v1/jobs/ID/result.pdf
 ```

@@ -34,7 +34,7 @@ draw.line([(130 + i * 10, 790 + random.randint(-20, 20)) for i in range(98)], fi
 buffer = io.BytesIO()
 image.save(buffer, "PNG")
 
-job = api.post("/api/v1/jobs", files={"file": ("notiz.png", buffer.getvalue(), "image/png")}).json()
+job = api.post("/api/v1/jobs", params={"filename": "notiz.png"}, content=buffer.getvalue()).json()
 for _ in range(180):
     job = api.get(job["links"]["self"]).json()
     if job["status"] in ("done", "failed"):

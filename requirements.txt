@@ -4,5 +4,4 @@ ocrmypdf==17.13.0
 pikepdf==10.17.0
 pillow==13.0.0
 pypdfium2==5.14.0
-python-multipart==0.0.33
 uvicorn==0.54.0

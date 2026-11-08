@@ -1,6 +1,6 @@
 """HTTP API: other programs hand in a file and fetch a searchable PDF.
 
-POST /api/v1/jobs takes a PDF or an image and answers at once with a job id;
+POST /api/v1/jobs takes a PDF or an image as the request body and answers at once with a job id;
 the caller asks for the status, or names a `callback_url` that is told when
 the job is done, and then downloads result.pdf and result.json. Each job
 lives in its own folder under WORK_DIR/api/jobs, so queued jobs survive a
@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Annotated
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from PIL import Image, ImageOps
 
@@ -327,22 +327,26 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
         return job
 
     @app.post("/api/v1/jobs", status_code=202)
-    async def submit(
-        name: Caller,
-        file: Annotated[UploadFile, File()],
-        callback_url: Annotated[str, Form()] = "",
-    ):
+    async def submit(request: Request, name: Caller, filename: str = "", callback_url: str = ""):
+        # The file is the raw body, read only after the token was checked
+        # (the dependency above), and cut off at the limit while streaming.
         callback_url = callback_url.strip()
         if callback_url and not re.match(r"^https?://[^\s/]+\S*$", callback_url):
             raise HTTPException(422, "callback_url must be an http or https URL")
+        declared = request.headers.get("content-length")
+        if declared is not None:
+            if not declared.isdigit():
+                raise HTTPException(400, "invalid Content-Length")
+            if int(declared) > limit:
+                raise HTTPException(413, f"the file is larger than {settings.api_max_upload_mb} MB")
         jobs.root.mkdir(parents=True, exist_ok=True)
         upload = jobs.root / f".upload-{secrets.token_hex(8)}"
         size, head = 0, b""
         try:
             with upload.open("wb") as out:
-                while chunk := await file.read(1 << 20):
-                    if not head:
-                        head = chunk[:16]
+                async for chunk in request.stream():
+                    if len(head) < 16:
+                        head += chunk[: 16 - len(head)]
                     size += len(chunk)
                     if size > limit:
                         raise HTTPException(413, f"the file is larger than {settings.api_max_upload_mb} MB")
@@ -350,7 +354,7 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
             kind = sniff(head)
             if kind is None:
                 raise HTTPException(415, "send a PDF, JPEG, PNG, TIFF or WebP file")
-            filename = Path(file.filename or f"upload.{kind}").name[:200]
+            filename = Path(filename.strip() or f"upload.{kind}").name[:200] or f"upload.{kind}"
             job = jobs.create(name, filename, kind, upload, callback_url)
         finally:
             upload.unlink(missing_ok=True)

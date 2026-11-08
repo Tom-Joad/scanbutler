@@ -62,8 +62,11 @@ def test_settings_need_a_key_for_the_api(monkeypatch, tmp_path):
 
 
 def test_no_token_no_access(setup):
-    _, _, tokens, client = setup
+    _, jobs, tokens, client = setup
     assert client.get("/api/v1/jobs").status_code == 401
+    # The body of a caller without a token is never written anywhere.
+    assert client.post("/api/v1/jobs", content=PDF).status_code == 401
+    assert not jobs.root.exists()
     assert client.get("/api/v1/jobs", headers=auth("sb_nope")).status_code == 401
     tokens.add("cookbutler")
     assert client.get("/api/v1/jobs", headers={"Authorization": "Basic x"}).status_code == 401
@@ -72,8 +75,8 @@ def test_no_token_no_access(setup):
 def test_submit_status_and_owner(setup):
     _, jobs, tokens, client = setup
     mine, other = tokens.add("cookbutler"), tokens.add("other")
-    answer = client.post("/api/v1/jobs", headers=auth(mine), files={"file": ("Rezept.pdf", PDF, "application/pdf")},
-                         data={"callback_url": "http://cookbutler.lan/hook"})
+    answer = client.post("/api/v1/jobs", headers=auth(mine), content=PDF,
+                         params={"filename": "Rezept.pdf", "callback_url": "http://cookbutler.lan/hook"})
     assert answer.status_code == 202
     job = answer.json()
     assert job["status"] == "queued" and job["filename"] == "Rezept.pdf"
@@ -94,12 +97,19 @@ def test_submit_status_and_owner(setup):
 def test_refuses_odd_files(setup):
     _, jobs, tokens, client = setup
     token = tokens.add("cookbutler")
-    answer = client.post("/api/v1/jobs", headers=auth(token), files={"file": ("x.exe", b"MZ\x90\x00", "x/y")})
+    answer = client.post("/api/v1/jobs", headers=auth(token), content=b"MZ\x90\x00")
     assert answer.status_code == 415
     big = PDF + b"0" * (2 << 20)
-    assert client.post("/api/v1/jobs", headers=auth(token), files={"file": ("big.pdf", big)}).status_code == 413
-    bad_hook = client.post("/api/v1/jobs", headers=auth(token), files={"file": ("a.pdf", PDF)},
-                           data={"callback_url": "file:///etc/passwd"})
+    assert client.post("/api/v1/jobs", headers=auth(token), content=big).status_code == 413
+
+    def chunks():  # no Content-Length: the limit applies while streaming
+        yield PDF
+        for _ in range(3):
+            yield b"0" * (1 << 20)
+
+    assert client.post("/api/v1/jobs", headers=auth(token), content=chunks()).status_code == 413
+    bad_hook = client.post("/api/v1/jobs", headers=auth(token), content=PDF,
+                           params={"callback_url": "file:///etc/passwd"})
     assert bad_hook.status_code == 422
     # Nothing is left behind by refused uploads.
     assert [p.name for p in jobs.root.iterdir()] == []
@@ -114,8 +124,8 @@ def test_job_ids_are_checked(setup):
 def test_worker_runs_job_and_calls_back(setup):
     settings, jobs, tokens, client = setup
     token = tokens.add("cookbutler")
-    job = client.post("/api/v1/jobs", headers=auth(token), files={"file": ("r.pdf", PDF)},
-                      data={"callback_url": "https://cookbutler.lan/hook"}).json()
+    job = client.post("/api/v1/jobs", headers=auth(token), content=PDF,
+                      params={"filename": "r.pdf", "callback_url": "https://cookbutler.lan/hook"}).json()
 
     def run(job, folder, settings):
         (folder / "result.pdf").write_bytes(PDF)
@@ -141,7 +151,7 @@ def test_worker_runs_job_and_calls_back(setup):
 def test_failed_job_keeps_the_error(setup):
     settings, jobs, tokens, client = setup
     token = tokens.add("cookbutler")
-    job = client.post("/api/v1/jobs", headers=auth(token), files={"file": ("r.pdf", PDF)}).json()
+    job = client.post("/api/v1/jobs", headers=auth(token), content=PDF, params={"filename": "r.pdf"}).json()
 
     def run(job, folder, settings):
         raise RuntimeError("ocrmypdf failed in every mode")
@@ -154,8 +164,8 @@ def test_failed_job_keeps_the_error(setup):
 def test_recover_and_clean(setup):
     settings, jobs, tokens, client = setup
     token = tokens.add("cookbutler")
-    first = client.post("/api/v1/jobs", headers=auth(token), files={"file": ("a.pdf", PDF)}).json()
-    second = client.post("/api/v1/jobs", headers=auth(token), files={"file": ("b.pdf", PDF)}).json()
+    first = client.post("/api/v1/jobs", headers=auth(token), content=PDF).json()
+    second = client.post("/api/v1/jobs", headers=auth(token), content=PDF).json()
     jobs.update(first["id"], status="running")
     old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat().replace("+00:00", "Z")
     jobs.update(second["id"], status="done", finished_at=old)
