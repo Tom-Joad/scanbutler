@@ -7,7 +7,10 @@ own process, so it is configured through the environment:
 - SCANBUTLER_HYBRID_DIR: folder for Mistral's answer per page image, named by
   the image's hash. A retry in another ocrmypdf mode sends a different (e.g.
   not deskewed) image and asks again; the same image is never paid twice.
-- MISTRAL_API_KEY, MISTRAL_API_BASE, MISTRAL_OCR_MODEL, MISTRAL_TIMEOUT.
+- SCANBUTLER_MISTRAL_RATE_FILE: request slots shared with the main process,
+  so all of them together keep to MISTRAL_MAX_RPS.
+- MISTRAL_API_KEY, MISTRAL_API_BASE, MISTRAL_OCR_MODEL, MISTRAL_TIMEOUT,
+  MISTRAL_MAX_RPS.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 from ocrmypdf import hookimpl
@@ -33,16 +37,31 @@ log = logging.getLogger(__name__)
 HYBRID_DIR = "SCANBUTLER_HYBRID_DIR"
 
 
-def _client():
+HYBRID_RATE = "SCANBUTLER_MISTRAL_RATE_FILE"
+
+_CLIENT = None
+_CLIENT_LOCK = threading.Lock()
+
+
+def _ocr(body: dict) -> dict:
+    """POST /ocr with this process's client: one connection, MISTRAL_MAX_RPS kept."""
+    global _CLIENT
     from .mistral import MistralClient
 
-    return MistralClient(
-        os.environ.get("MISTRAL_API_KEY", ""),
-        os.environ.get("MISTRAL_API_BASE", "https://api.mistral.ai/v1").rstrip("/"),
-        os.environ.get("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
-        "",
-        float(os.environ.get("MISTRAL_TIMEOUT", "300")),
-    )
+    with _CLIENT_LOCK:
+        if _CLIENT is None:
+            rate = os.environ.get(HYBRID_RATE, "").strip()
+            _CLIENT = MistralClient(
+                os.environ.get("MISTRAL_API_KEY", ""),
+                os.environ.get("MISTRAL_API_BASE", "https://api.mistral.ai/v1").rstrip("/"),
+                os.environ.get("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
+                "",
+                float(os.environ.get("MISTRAL_TIMEOUT", "300")),
+                max_rps=float(os.environ.get("MISTRAL_MAX_RPS", "1") or 1),
+                rate_file=Path(rate) if rate else None,
+            )
+        client = _CLIENT
+    return client._post("/ocr", {"model": client.ocr_model, **body})
 
 
 def image_body(image: Image.Image) -> dict:
@@ -59,32 +78,25 @@ def image_body(image: Image.Image) -> dict:
     }
 
 
-def mistral_page(image_file: Path, folder: Path, ocr=None) -> dict:
-    """Mistral's reading of one page image, from the folder if it was asked before."""
+def mistral_page(image_file: Path, folder: Path, ocr=None) -> tuple[dict, str]:
+    """Mistral's reading of one page image and the image's hash; asked once per image."""
     digest = hashlib.sha256(image_file.read_bytes()).hexdigest()
     cached = folder / f"{digest}.json"
     if cached.exists():
-        return json.loads(cached.read_text(encoding="utf-8"))
+        return json.loads(cached.read_text(encoding="utf-8")), digest
     with Image.open(image_file) as image:
         body = image_body(image)
-    if ocr is None:
-        client = _client()
-        try:
-            result = client._post("/ocr", {"model": client.ocr_model, **body})
-        finally:
-            client.close()
-    else:
-        result = ocr(body)
+    result = (ocr or _ocr)(body)
     pages = result.get("pages") or [{}]
     page = pages[0]
     tmp = cached.with_suffix(".tmp")
     tmp.write_text(json.dumps(page, ensure_ascii=False), encoding="utf-8")
     tmp.replace(cached)
-    return page
+    return page, digest
 
 
 class HybridOcrEngine(TesseractOcrEngine):
-    """Tesseract, corrected block by block with Mistral OCR."""
+    """Tesseract, corrected line by line with Mistral OCR."""
 
     def __str__(self) -> str:
         return f"Tesseract OCR {TesseractOcrEngine.version()} + Mistral OCR"
@@ -99,21 +111,31 @@ class HybridOcrEngine(TesseractOcrEngine):
             TesseractOcrEngine.generate_hocr(input_file, hocr, text, options)
             page = HocrParser(hocr).parse()
         folder = Path(os.environ[HYBRID_DIR])
-        reading = mistral_page(Path(input_file), folder)
+        record_path = folder / f"page-{page_number + 1:04d}.json"
+        try:
+            reading, digest = mistral_page(Path(input_file), folder)
+        except Exception as exc:  # noqa: BLE001 - reported per page, see below
+            # Raising here would fail ocrmypdf, and its next mode would send
+            # the page again (a differently prepared image, so no cache hit):
+            # paid again, to fail again. The page keeps Tesseract's reading;
+            # the record tells the caller that Mistral failed.
+            record_path.write_text(json.dumps({"page": page_number + 1, "error": str(exc)[:500]}), encoding="utf-8")
+            log.warning("page %d: Mistral OCR failed: %s", page_number + 1, exc)
+            return page, hybrid.text_of(page)
         with Image.open(input_file) as image:
             width, height = image.size
         blocks = hybrid.blocks_from_page(reading, width, height)
         merged, stats = hybrid.merge(page, blocks)
         record = {
             "page": page_number + 1,
-            "image": hashlib.sha256(Path(input_file).read_bytes()).hexdigest(),
+            "image": digest,
             "blocks": stats.blocks,
             "lines_kept": stats.lines_kept,
             "lines_replaced": stats.lines_replaced,
             "lines_added": stats.lines_added,
             "noise_dropped": stats.noise_dropped,
         }
-        (folder / f"page-{page_number + 1:04d}.json").write_text(json.dumps(record), encoding="utf-8")
+        record_path.write_text(json.dumps(record), encoding="utf-8")
         log.info("page %d: %d lines from Mistral, %d kept", page_number + 1, stats.lines_replaced, stats.lines_kept)
         return merged, hybrid.text_of(merged)
 

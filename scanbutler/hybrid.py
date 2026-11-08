@@ -367,7 +367,7 @@ def merge(page: OcrElement, blocks: list[Block], keep_ratio: float = KEEP_RATIO)
     lines = page.lines
     drop: set[int] = set()  # ids of Tesseract words to drop
     claimed: set[int] = set()  # words inside some block
-    added: list[OcrElement] = []
+    added: list[tuple[OcrElement, int | None]] = []
     for block in blocks:
         inside = [(line, [w for w in line.words if id(w) not in claimed and _center_in(w, block.box)]) for line in lines]
         inside = [(line, words) for line, words in inside if words]
@@ -378,7 +378,10 @@ def merge(page: OcrElement, blocks: list[Block], keep_ratio: float = KEEP_RATIO)
             new_lines = _stripes(block)
             stats.lines_replaced += len(new_lines)
         if new_lines:
-            added.append(OcrElement(ocr_class=OcrClass.PARAGRAPH, bbox=_union([l.bbox for l in new_lines]), children=new_lines))
+            para = OcrElement(ocr_class=OcrClass.PARAGRAPH, bbox=_union([l.bbox for l in new_lines]), children=new_lines)
+            # Placed where the block's first Tesseract line was, so the
+            # page's text stays in reading order.
+            added.append((para, id(inside[0][0]) if inside else None))
     if blocks:
         for w in page.words:
             if id(w) not in claimed and w.confidence is not None and w.confidence < NOISE_CONFIDENCE:
@@ -389,21 +392,58 @@ def merge(page: OcrElement, blocks: list[Block], keep_ratio: float = KEEP_RATIO)
     return _without(page, drop, added), stats
 
 
-def _without(element: OcrElement, drop: set[int], add: list[OcrElement]) -> OcrElement:
-    """A copy of the page tree without the words in `drop`, plus `add` at the end."""
+def _without(element: OcrElement, drop: set[int], add: list[tuple[OcrElement, int | None]]) -> OcrElement:
+    """A copy of the page tree without the words in `drop`, with the paragraphs in `add`.
+
+    A paragraph goes next to the Tesseract paragraph that held its anchor
+    line: after what is left of it above the new text, otherwise before it.
+    One without an anchor goes among the page's areas by its height.
+    """
+    anchored: dict[int, list[OcrElement]] = {}
+    loose: list[OcrElement] = []
+    for para, anchor in add:
+        if anchor is None:
+            loose.append(para)
+        else:
+            anchored.setdefault(anchor, []).append(para)
+    placed: set[int] = set()
 
     def prune(node: OcrElement) -> OcrElement | None:
         if node.ocr_class == OcrClass.WORD:
             return None if id(node) in drop else node
         if not node.children:
             return node
-        children = [c for c in (prune(child) for child in node.children) if c is not None]
+        children: list[OcrElement] = []
+        for child in node.children:
+            kept = prune(child)
+            mine = []
+            if child.ocr_class == OcrClass.PARAGRAPH:
+                for line in child.lines:
+                    for para in anchored.get(id(line), []):
+                        if id(para) not in placed:
+                            placed.add(id(para))
+                            mine.append(para)
+            if not mine:
+                if kept is not None:
+                    children.append(kept)
+                continue
+            above = kept is not None and any(l.bbox and l.bbox.top < mine[0].bbox.top for l in kept.lines)
+            children.extend([kept, *mine] if above else [*mine, *([kept] if kept is not None else [])])
         if not children and node.ocr_class != OcrClass.PAGE:
             return None
         return _copy(node, children)
 
     page = prune(element) or _copy(element, [])
-    return _copy(page, [*page.children, *add])
+    # Paragraphs whose anchor wasn't inside a paragraph, and those without one.
+    loose += [para for para, _ in add if id(para) not in placed and para not in loose]
+    top_level = list(page.children)
+    for para in loose:
+        at = next(
+            (i for i, child in enumerate(top_level) if child.bbox is not None and child.bbox.top > para.bbox.top),
+            len(top_level),
+        )
+        top_level.insert(at, para)
+    return _copy(page, top_level)
 
 
 def _copy(node: OcrElement, children: list[OcrElement]) -> OcrElement:

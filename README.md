@@ -769,8 +769,12 @@ The body is the file itself (no form encoding): a PDF, JPEG, PNG, TIFF or
 WebP. Both query parameters are optional; `filename` names the result.
 Photos are turned upright by their orientation tag. With `callback_url`, Scanbutler posts
 `{"id", "status": "ok"|"failed", "message", "links"}` there when the job is
-finished; the program then fetches the results with its token. Jobs run one
-after the other, ahead of stacks waiting for OCR, and survive a restart.
+finished; the program then fetches the results with its token. If Mistral
+can't read a page (an outage, the spending limit), the job fails with
+Mistral's error; a page is never sent twice. Jobs run one after the other,
+ahead of stacks waiting for OCR, keep to `MISTRAL_MAX_RPS` together with
+the folder inputs, and survive a restart. With the API on, the container's
+health check also asks `/api/v1/health`.
 Finished jobs are removed after `API_RESULT_HOURS`.
 
 ```bash

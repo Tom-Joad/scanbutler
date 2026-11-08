@@ -136,8 +136,7 @@ for lang in deu eng fra osd; do
 done
 
 # The health check's own command.
-docker exec "$NAME" python3 -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/scanbutler.heartbeat') < 300 else 1)" \
-    || fail "no fresh heartbeat"
+docker exec "$NAME" python3 -m scanbutler.health || fail "no fresh heartbeat"
 
 USERS=$(docker exec "$NAME" ps -eo user,args | awk '/python3 -m scanbutler run/ && !/awk/ {print $1}')
 [[ -n $USERS ]] || fail "watcher not running"
@@ -186,6 +185,8 @@ in_log '"event":"api has no token yet' || fail "no warning about the missing tok
 token=$(docker exec "$NAME" scanbutler token add smoke) || fail "token add failed"
 [[ $token == sb_* ]] || fail "unexpected token: $token"
 docker exec "$NAME" scanbutler token list | grep -q '^smoke' || fail "token list misses the token"
+for _ in $(seq 40); do docker exec "$NAME" test -f /tmp/scanbutler.heartbeat && break; sleep 1; done
+docker exec "$NAME" python3 -m scanbutler.health || fail "health check fails with the API on"
 text=$(docker exec "$NAME" python3 /tests/api_roundtrip.py "$token" 2>&1) || fail "api round trip: $text"
 grep -q "Zimtschnecken" <<<"$text" || fail "the result's text layer lacks Mistral's text: $text"
 [[ $(stat -c %u "$WORK/config/api/tokens.json" 2>/dev/null || docker exec "$NAME" stat -c %u /config/api/tokens.json) == "$PUID" ]] \
@@ -193,5 +194,20 @@ grep -q "Zimtschnecken" <<<"$text" || fail "the result's text layer lacks Mistra
 [[ $(docker exec "$NAME" stat -c %a /config/api/tokens.json) == 600 ]] || fail "tokens.json readable by others"
 if docker exec "$NAME" grep -rqs "$token" /config /tmp /app; then fail "the API token was written to a file"; fi
 if in_log "$token"; then fail "the API token is in the log"; fi
+
+echo "== a page Mistral refuses fails the job after one request, not one per ocrmypdf mode"
+docker exec "$NAME" sh -c 'rm -f /tmp/fake-mistral-calls; touch /tmp/fake-mistral-refuse'
+text=$(docker exec "$NAME" python3 /tests/api_roundtrip.py "$token" refused 2>&1) || fail "refused round trip: $text"
+calls=$(docker exec "$NAME" sh -c 'wc -l < /tmp/fake-mistral-calls')
+[[ $calls == 1 ]] || fail "Mistral was asked $calls times for one refused page"
+
+echo "== a taken API port stops the service instead of leaving it half running"
+docker rm -f "$NAME" >/dev/null
+docker run -d --name "$NAME" -e API_ENABLED=true -e API_PORT=8080 -e MISTRAL_API_KEY="$SECRET" \
+    -e STACKS_ENABLED=false -e SCANNER_ENABLED=false --entrypoint sh "$IMAGE" -c \
+    'python3 -c "import socket,time; s=socket.socket(); s.bind((\"0.0.0.0\", 8080)); s.listen(); time.sleep(600)" &
+     sleep 1; exec /init' >/dev/null
+for _ in $(seq 60); do in_log '"event":"stopped: an input or the API is no longer running"' && break; sleep 1; done
+in_log '"event":"stopped: an input or the API is no longer running"' || fail "the service kept running without its API"
 
 echo "OK"

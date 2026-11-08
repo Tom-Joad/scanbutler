@@ -1,10 +1,13 @@
 """Stand-in for Mistral's /ocr endpoint for the smoke test (tests/smoke.sh).
 
 Every page image is answered with one text block over the middle of the
-page, as if it held a handwritten line that Tesseract can't read.
+page, as if it held a handwritten line that Tesseract can't read. While
+/tmp/fake-mistral-refuse exists it refuses like an exhausted account (401).
+Each request adds a line to /tmp/fake-mistral-calls.
 """
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TEXT = "Handgeschriebene Notiz Zimtschnecken"
@@ -13,6 +16,16 @@ TEXT = "Handgeschriebene Notiz Zimtschnecken"
 class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        with open("/tmp/fake-mistral-calls", "a") as calls:
+            calls.write(self.path + "\n")
+        if os.path.exists("/tmp/fake-mistral-refuse"):
+            data = b'{"detail": "Unauthorized"}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         ok = self.path == "/ocr" and body.get("include_blocks") and body["document"]["type"] == "image_url"
         page = {
             "index": 0,

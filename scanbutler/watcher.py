@@ -339,16 +339,23 @@ def run_all(settings: Settings, backend) -> None:
     ]
     for worker in workers:
         worker.start()
+    services: list[threading.Thread] = []
     if settings.api_enabled:
         from .api import serve
 
-        serve(settings, stop)
+        services = serve(settings, stop)
 
     # The main thread keeps the healthcheck heartbeat going; a single stack
     # can take an hour, which must not count as hung. It also clears out old
     # work folders, at start and then every few hours.
     next_cleanup = 0.0
-    while not stop.is_set() and (settings.api_enabled or any(worker.is_alive() for worker in workers)):
+    def running() -> bool:
+        # Stop (s6 restarts the service) once the inputs have all died or an
+        # API thread has: until then the heartbeat says healthy.
+        inputs = not workers or any(worker.is_alive() for worker in workers)
+        return inputs and all(thread.is_alive() for thread in services)
+
+    while not stop.is_set() and running():
         HEARTBEAT.touch()
         if time.monotonic() >= next_cleanup:
             next_cleanup = time.monotonic() + retention.CHECK_SECONDS
@@ -357,4 +364,7 @@ def run_all(settings: Settings, backend) -> None:
             except Exception:  # noqa: BLE001 - cleanup must never stop the watcher
                 log.exception("work folder cleanup failed")
         stop.wait(30)
-    log.info("stopped")
+    if not stop.is_set():
+        log.error("stopped: an input or the API is no longer running")
+    else:
+        log.info("stopped")

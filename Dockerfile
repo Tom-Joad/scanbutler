@@ -66,9 +66,9 @@ VOLUME /config
 EXPOSE 8080
 
 # The watcher touches the heartbeat every 30 s, also while a long stack is
-# being processed.
+# being processed; with API_ENABLED the API must answer as well.
 HEALTHCHECK --interval=60s --timeout=5s --start-period=90s --retries=3 \
-    CMD python3 -c "import os,sys,time; sys.exit(0 if time.time()-os.path.getmtime('/tmp/scanbutler.heartbeat') < 300 else 1)"
+    CMD python3 -m scanbutler.health
 
 # The entrypoint stays the base image's /init (s6-overlay), which must run as
 # PID 1: don't add `--init` to `docker run`.

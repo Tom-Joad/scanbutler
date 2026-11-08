@@ -27,7 +27,7 @@ from PIL import Image, ImageOps
 
 from . import __version__, logging_setup, pdfops, priority
 from .config import Settings
-from .ocr_plugin import HYBRID_DIR
+from .ocr_plugin import HYBRID_DIR, HYBRID_RATE
 from .tokens import TokenStore
 
 log = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ _MAGIC = [
     (b"MM\x00*", "tif"),
 ]
 CALLBACK_DELAYS = (2, 5)
+MAX_PAGE_INCHES = 16.5
 
 
 def _now() -> str:
@@ -68,11 +69,15 @@ def image_to_pdf(src: Path, dst: Path) -> None:
             frame = ImageOps.exif_transpose(image.copy())
             frames.append(frame.convert("L" if frame.mode in ("1", "L", "LA", "I;16") else "RGB"))
         dpi = image.info.get("dpi")
-    if dpi and dpi[0] >= 72:
-        resolution = float(dpi[0])
+    longest = max(frames[0].size)
+    stated = float(dpi[0]) if dpi and dpi[0] else 0.0
+    # A scanner states its resolution; phones and cameras write 72 dpi or
+    # nothing, which would make a 4000-pixel photo a 55-inch page that OCR
+    # reads as tiny print. Trust the value only if it gives a page up to A3
+    # (16.5 in); otherwise take the long side as A4 (11.7 in).
+    if stated >= 100 and longest / stated <= MAX_PAGE_INCHES:
+        resolution = stated
     else:
-        # Phone photos say nothing useful; take the long side as 11.7 in (A4).
-        longest = max(frames[0].size)
         resolution = min(600.0, max(150.0, longest / 11.7))
     tmp = dst.with_name(dst.name + ".tmp")
     frames[0].save(tmp, "PDF", resolution=resolution, save_all=True, append_images=frames[1:])
@@ -177,6 +182,16 @@ def _result_json(job: dict, folder: Path, pdf: Path) -> dict:
     return {"id": job["id"], "filename": job["filename"], "pages": pages}
 
 
+def mistral_errors(mistral: Path) -> list[tuple[int, str]]:
+    """Pages Mistral couldn't read in this run, from the plugin's page records."""
+    errors = []
+    for record in sorted(mistral.glob("page-*.json")):
+        info = json.loads(record.read_text(encoding="utf-8"))
+        if info.get("error"):
+            errors.append((info["page"], info["error"]))
+    return errors
+
+
 def process(job: dict, folder: Path, settings: Settings) -> int:
     """Make result.pdf and result.json for one job; returns the page count."""
     source = folder / f"input.{job['kind']}"
@@ -185,8 +200,15 @@ def process(job: dict, folder: Path, settings: Settings) -> int:
         image_to_pdf(source, pdf)
     mistral = folder / "mistral"
     mistral.mkdir(exist_ok=True)
+    for record in mistral.glob("page-*.json"):  # from an attempt before a restart
+        record.unlink()
     result = folder / "result.pdf"
-    env = {**os.environ, HYBRID_DIR: str(mistral)}
+    env = {
+        **os.environ,
+        HYBRID_DIR: str(mistral),
+        HYBRID_RATE: str(settings.work_dir / "api" / "mistral.rate"),
+        "MISTRAL_MAX_RPS": str(settings.max_rps),
+    }
     pdfops.make_searchable(
         pdf,
         result,
@@ -196,6 +218,9 @@ def process(job: dict, folder: Path, settings: Settings) -> int:
         priority=True,
         env=env,
     )
+    failed = mistral_errors(mistral)
+    if failed:
+        raise RuntimeError(f"Mistral OCR failed on page {failed[0][0]}: {failed[0][1]}")
     data = _result_json(job, folder, result)
     tmp = folder / "result.json.tmp"
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -361,6 +386,11 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
         log.info("api job queued", extra={"job": job["id"], "owner": name, "kind": kind, "bytes": size})
         return JSONResponse(public(job), status_code=202, headers={"Location": f"/api/v1/jobs/{job['id']}"})
 
+    @app.get("/api/v1/health")
+    def health():
+        # No token: Docker's health check calls it. Says nothing but "up".
+        return {"status": "ok"}
+
     @app.get("/api/v1/jobs")
     def list_jobs(name: Caller):
         return {"jobs": [public(j) for j in jobs.all() if j["owner"] == name]}
@@ -397,8 +427,12 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
     return app
 
 
-def serve(settings: Settings, stop: threading.Event) -> None:
-    """Start the API server and the job worker in background threads."""
+def serve(settings: Settings, stop: threading.Event) -> list[threading.Thread]:
+    """Start the API server and the job worker; returns their threads.
+
+    The caller watches them: uvicorn ends its thread when it can't start
+    (the port is taken), and the container must not look healthy then.
+    """
     import uvicorn
 
     root = settings.work_dir / "api"
@@ -406,7 +440,8 @@ def serve(settings: Settings, stop: threading.Event) -> None:
     tokens = TokenStore(root / "tokens.json")
     if not tokens.tokens():
         log.warning("api has no token yet; create one with: scanbutler token add NAME")
-    threading.Thread(target=Worker(jobs, settings, stop).run, name="api-jobs", daemon=True).start()
+    worker = threading.Thread(target=Worker(jobs, settings, stop).run, name="api-jobs", daemon=True)
+    worker.start()
     server = uvicorn.Server(
         uvicorn.Config(
             create_app(settings, jobs, tokens),
@@ -417,7 +452,8 @@ def serve(settings: Settings, stop: threading.Event) -> None:
             proxy_headers=False,
         )
     )
-    threading.Thread(target=server.run, name="api", daemon=True).start()
+    http = threading.Thread(target=server.run, name="api", daemon=True)
+    http.start()
 
     def shutdown() -> None:
         stop.wait()
@@ -425,3 +461,4 @@ def serve(settings: Settings, stop: threading.Event) -> None:
 
     threading.Thread(target=shutdown, name="api-stop", daemon=True).start()
     log.info("api listening", extra={"port": settings.api_port})
+    return [http, worker]

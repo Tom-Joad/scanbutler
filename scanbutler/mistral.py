@@ -8,11 +8,13 @@ names have changed between major versions, while the REST contract for
 from __future__ import annotations
 
 import base64
+import fcntl
 import json
 import logging
 import random
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -66,6 +68,7 @@ class MistralClient:
         max_attempts: int = 10,
         max_rps: float = 0.0,
         reasoning_effort: str = "",
+        rate_file: Path | None = None,
     ) -> None:
         self._http = httpx.Client(
             base_url=api_base,
@@ -84,6 +87,9 @@ class MistralClient:
         # panel, so the request rate is a setting; 0 disables the throttle.
         self._min_interval = 1.0 / max_rps if max_rps > 0 else 0.0
         self._next_slot = 0.0
+        # Shared with other processes (the API's OCR runs in ocrmypdf's
+        # workers): they all keep to the same MISTRAL_MAX_RPS through it.
+        self._rate_file = rate_file
         # Slots are handed out one at a time, so a scan's request can go
         # ahead of a stack's requests that are already waiting.
         self._slot = threading.Condition()
@@ -115,6 +121,34 @@ class MistralClient:
                         self._priority_waiting -= 1
                 self._next_slot = now + self._min_interval
                 self._slot.notify_all()
+            if self._rate_file is not None:
+                self._shared_slot()
+
+    def _shared_slot(self) -> None:
+        """Wait for the next request slot of all processes using the rate file."""
+        self._rate_file.parent.mkdir(parents=True, exist_ok=True)
+        # "a+" creates the file; after truncate(0) appending writes at 0.
+        with open(self._rate_file, "a+", encoding="ascii") as handle:
+            # Held while waiting: the processes queue up on the lock.
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                try:
+                    slot = float(handle.read().strip() or 0)
+                except ValueError:
+                    slot = 0.0
+                now = time.time()
+                # Never longer than one interval: a clock jump or a stale
+                # file must not stall every request.
+                wait = min(max(0.0, slot - now), self._min_interval)
+                if wait:
+                    time.sleep(wait)
+                handle.seek(0)
+                handle.truncate()
+                handle.write(f"{time.time() + self._min_interval:.3f}")
+                handle.flush()
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     def _back_off(self, attempt: int, retry_after: str | None, path: str, reason: object) -> None:
         delay = min(60.0, 2.0**attempt) + random.uniform(0, 1)

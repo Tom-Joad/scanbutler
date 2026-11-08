@@ -1,7 +1,8 @@
 """Smoke test of the API from inside the container: send a scribbled page
 image, wait for the job, and print the result PDF's text layer.
 
-Usage: api_roundtrip.py TOKEN
+Usage: api_roundtrip.py TOKEN [refused]
+With "refused" the job must fail with Mistral's error instead.
 """
 
 import io
@@ -14,6 +15,7 @@ import pypdfium2
 from PIL import Image, ImageDraw
 
 token = sys.argv[1]
+refused = sys.argv[2:] == ["refused"]
 # The API's links are paths from the server root, like /api/v1/jobs/ID.
 api = httpx.Client(base_url="http://127.0.0.1:8080", headers={"Authorization": f"Bearer {token}"})
 
@@ -40,6 +42,10 @@ for _ in range(180):
     if job["status"] in ("done", "failed"):
         break
     time.sleep(1)
+if refused:
+    assert job["status"] == "failed" and "Mistral OCR failed on page 1" in job["error"], job
+    print(job["error"])
+    sys.exit(0)
 assert job["status"] == "done", job
 pdf = api.get(job["links"]["pdf"])
 assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
