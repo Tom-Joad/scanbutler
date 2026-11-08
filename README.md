@@ -732,14 +732,15 @@ recipe app sending a photo of a handwritten recipe card, for example. With
 `API_ENABLED=true` the container answers on port 8080.
 
 The text layer of these PDFs is made for handwriting. Tesseract reads the
-page as usual, and Mistral OCR reads the same page image. Wherever the two
-agree, Tesseract's words stay: they sit exactly on the printed words, so a
-search hit or a selection fits word by word. Where Tesseract misread a
-paragraph (handwriting, faint print), Mistral's reading replaces it, placed
-on the lines Tesseract saw there. Search then finds handwritten words too;
-selecting them marks the line they are on. API jobs use Mistral's direct
-OCR, not the batch API: a page takes seconds and costs the full OCR price
-(well under a cent).
+page as usual, and Mistral OCR reads the same page image. Mistral's text is
+lined up with the lines Tesseract found. A line both read alike keeps
+Tesseract's words, which sit exactly on the printed words, so a search hit
+or a selection fits word by word. Every other line (handwriting, faint
+print) gets Mistral's reading instead, on the same line; lines Tesseract
+didn't find at all are put into the gap where they belong. Search then finds
+handwritten words too; their highlight covers about the right part of the
+line. API jobs use Mistral's direct OCR, not the batch API: a page takes
+seconds and costs the full OCR price (well under a cent).
 
 **Tokens.** Every calling program gets its own token. Create it in the
 container; it is shown once:

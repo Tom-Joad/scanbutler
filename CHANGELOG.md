@@ -15,8 +15,9 @@ layout, a changed webhook payload) only comes with a new major version.
   (`scanbutler token add|list|remove`), stored only as a hash, and sees only
   its own jobs. See README > HTTP API.
 - **Handwriting in the text layer** of API results: Mistral OCR reads the
-  same page image as Tesseract, and every paragraph Tesseract misread is
-  replaced by Mistral's reading, placed on the lines Tesseract found.
+  same page image as Tesseract, and every line Tesseract misread gets
+  Mistral's reading in its place; lines Tesseract missed are added where
+  they belong.
 
 ## [1.8.3] - 2026-11-07
 
