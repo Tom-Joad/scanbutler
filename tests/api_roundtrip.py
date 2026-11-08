@@ -44,6 +44,6 @@ assert job["status"] == "done", job
 pdf = api.get(job["links"]["pdf"])
 assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
 result = api.get(job["links"]["json"]).json()
-assert result["pages"][0]["blocks_from_mistral"] == 1, result
+assert result["pages"][0]["lines_from_mistral"] == 1, result
 print(pypdfium2.PdfDocument(pdf.content)[0].get_textpage().get_text_range())
 assert api.delete(job["links"]["self"]).status_code == 204

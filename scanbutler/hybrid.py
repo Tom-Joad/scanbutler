@@ -2,25 +2,42 @@
 
 Tesseract places every word exactly but can't read handwriting; Mistral OCR
 reads handwriting well but only says which paragraph ("block") a text
-belongs to. Both look at the same page image. For every Mistral block the
-Tesseract words inside it are compared with Mistral's text: where they agree,
-Tesseract's words stay, so search hits and selections fit word by word. Where
-they don't (handwriting, faint print), Mistral's text replaces them, spread
-over the lines Tesseract found in the block, or over the block if it found
-none.
+belongs to. Both look at the same page image. Within each Mistral block,
+Mistral's words are aligned character by character with the lines Tesseract
+found there, so every line gets its share of Mistral's text. A line both
+read alike keeps Tesseract's words, and search hits and selections fit word
+by word; any other line (handwriting, faint print) gets Mistral's words,
+spread over the line. A block Tesseract found no line in gets Mistral's
+lines in equal stripes. Mistral's text that Tesseract found no line for (a
+handwritten line it missed) goes into the gap below the line before it.
+
+Deciding per block was too coarse: Mistral returns a whole handwritten
+recipe as one block, and Tesseract reads neat handwriting half right, so the
+block as a whole looked close enough while many lines were wrong.
 """
 
 from __future__ import annotations
 
 import re
+from collections import Counter
 from dataclasses import dataclass, replace
 from difflib import SequenceMatcher
 
 from ocrmypdf.models.ocr_element import BoundingBox, OcrClass, OcrElement
 
-# Share of matching characters at which Tesseract's reading of a block is
-# kept. Printed text measures 0.9 and more; handwriting stays far below.
-KEEP_RATIO = 0.75
+# Share of matching characters at which Tesseract's reading of a line is
+# kept: all of them. Printed lines agree letter for letter; one wrong letter
+# ("Stlck" for "Stück", 0.97) would hide the word from search, and Mistral's
+# reading is the better one wherever the two differ.
+KEEP_RATIO = 1.0
+
+# Shorter runs of matching letters say nothing: "her" or "en" turn up in any
+# two German lines, misread or not.
+MIN_MATCH = 4
+
+# Tesseract words outside every Mistral block below this confidence are
+# dropped: what Mistral saw no text in is a flourish, a margin or a stain.
+NOISE_CONFIDENCE = 0.6
 
 # Blocks whose content is no running text: tables come as a reference to a
 # separate table, images as one to an image, so their area keeps Tesseract.
@@ -143,55 +160,233 @@ def _line_of_words(text: str, box: BoundingBox) -> OcrElement:
     return OcrElement(ocr_class=OcrClass.LINE, bbox=box, children=children)
 
 
-def _layout(block: Block, found: list[BoundingBox]) -> list[OcrElement]:
-    """Mistral's lines of `block`, placed on the lines Tesseract found there.
+def _stripes(block: Block) -> list[OcrElement]:
+    """Mistral's lines of a block Tesseract found nothing in, in equal stripes."""
+    box, lines = block.box, block.lines
+    step = box.height / len(lines)
+    return [
+        _line_of_words(text, BoundingBox(box.left, box.top + i * step, box.right, box.top + (i + 1) * step))
+        for i, text in enumerate(lines)
+    ]
 
-    With as many Tesseract lines as Mistral lines each takes one; otherwise
-    the lines share the area Tesseract saw writing in (or the whole block)
-    in equal stripes.
+
+def _take(words: list[str], letters: int) -> int:
+    """How many of `words` come closest to `letters` letters."""
+    count, total = 0, 0
+    for word in words:
+        size = len(_letters(word))
+        if abs(total + size - letters) > abs(total - letters):
+            break
+        count, total = count + 1, total + size
+    return count
+
+
+def assign(lines: list[str], words: list[str]) -> list[list[tuple[str, bool]]]:
+    """Mistral's `words`, shared out over Tesseract's `lines` in reading order.
+
+    The letters of both readings are aligned; each word goes to the line
+    most of its letters matched. Words between two matched ones go where
+    Tesseract read letters it couldn't match: as many as Tesseract has at the
+    end of the line before go there, as many as it has at the start of the
+    line after go there. What is left belongs to no line Tesseract found (a
+    line it missed); it is marked False and follows the line before, so no
+    word of Mistral's is lost.
     """
-    lines = block.lines
-    if len(found) == len(lines):
-        boxes = sorted(found, key=lambda b: b.top)
-    else:
-        area = _union(found) if found else block.box
-        step = area.height / len(lines)
-        boxes = [
-            BoundingBox(area.left, area.top + i * step, area.right, area.top + (i + 1) * step) for i in range(len(lines))
-        ]
-    return [_line_of_words(text, box) for text, box in zip(lines, boxes) if box.height > 0 and box.width > 0]
+    t_text, t_line = [], []
+    for index, text in enumerate(lines):
+        for char in _letters(text):
+            t_text.append(char)
+            t_line.append(index)
+    m_text, m_word = [], []
+    for index, word in enumerate(words):
+        for char in _letters(word):
+            m_text.append(char)
+            m_word.append(index)
+    votes = [Counter() for _ in words]
+    hit = [False] * len(t_text)
+    matcher = SequenceMatcher(None, "".join(t_text), "".join(m_text), autojunk=False)
+    for a, b, size in matcher.get_matching_blocks():
+        if size < MIN_MATCH:
+            continue
+        for k in range(size):
+            votes[m_word[b + k]][t_line[a + k]] += 1
+            hit[a + k] = True
+    # Letters Tesseract read but couldn't match, at the start and end of each line.
+    lead, trail = [0] * len(lines), [0] * len(lines)
+    for index in range(len(lines)):
+        flags = [h for h, line in zip(hit, t_line) if line == index]
+        if any(flags):
+            lead[index] = flags.index(True)
+            trail[index] = flags[::-1].index(True)
+        else:
+            lead[index] = len(flags)
+
+    line_of: list[int | None] = []
+    for word, vote in zip(words, votes):
+        line, count = vote.most_common(1)[0] if vote else (None, 0)
+        line_of.append(line if count * 2 >= max(1, len(_letters(word))) else None)
+    # Matching blocks never cross, but a word may still vote for an earlier line.
+    current = 0
+    for index, line in enumerate(line_of):
+        if line is not None:
+            current = max(current, line)
+            line_of[index] = current
+
+    shared: list[list[tuple[str, bool]]] = [[] for _ in lines]
+    index = 0
+    while index < len(words):
+        if line_of[index] is not None:
+            shared[line_of[index]].append((words[index], True))
+            index += 1
+            continue
+        end = index
+        while end < len(words) and line_of[end] is None:
+            end += 1
+        _share_run(words[index:end], line_of[index - 1] if index else None,
+                   line_of[end] if end < len(words) else None, lead, trail, shared)
+        index = end
+    return shared
+
+
+def _share_run(run: list[str], before: int | None, after: int | None, lead: list[int], trail: list[int],
+               shared: list[list[tuple[str, bool]]]) -> None:
+    """Words between the matched words of line `before` and line `after`."""
+    # The start of the line after: as many letters as Tesseract read there unmatched.
+    back = _take(run[::-1], lead[after]) if after is not None else 0
+    body, back_words = run[: len(run) - back], run[len(run) - back:]
+    # The end of the line before, then lines in between that matched nothing.
+    slots = [(before, trail[before])] if before is not None else []
+    first = before + 1 if before is not None else 0
+    last = after if after is not None else len(lead)
+    slots += [(line, lead[line]) for line in range(first, last)]
+    owner = before
+    for line, letters in slots:
+        count = _take(body, letters)
+        shared[line].extend((w, True) for w in body[:count])
+        body = body[count:]
+        owner = line if count or owner is None else owner
+    if body:
+        if owner is None:
+            # Before the first match and no line to fill: it opens the line after.
+            back_words = body + back_words
+        else:
+            shared[owner].extend((w, False) for w in body)
+    if after is not None:
+        shared[after].extend((w, True) for w in back_words)
+
+
+def _split(words: list[str], parts: int) -> list[list[str]]:
+    """`words` in `parts` runs of about the same length, in order."""
+    total = sum(len(w) + 1 for w in words)
+    runs: list[list[str]] = [[] for _ in range(parts)]
+    done = 0
+    for word in words:
+        index = min(parts - 1, int(done * parts / total))
+        runs[index].append(word)
+        done += len(word) + 1
+    return [run for run in runs if run]
+
+
+def _pitch(boxes: list[BoundingBox]) -> float:
+    """The usual distance from one line to the next."""
+    tops = sorted(b.top for b in boxes)
+    steps = sorted(b - a for a, b in zip(tops, tops[1:]) if b - a > 0)
+    heights = sorted(b.height for b in boxes)
+    height = heights[len(heights) // 2]
+    if not steps:
+        return height * 1.6
+    # With few lines found, the steps may span missed lines themselves;
+    # handwriting rarely leaves more than a line's height between lines.
+    step = steps[len(steps) // 2]
+    return max(height, min(step, height * 2))
 
 
 @dataclass
 class MergeStats:
     blocks: int = 0
-    kept: int = 0
-    replaced: int = 0
+    lines_kept: int = 0
+    lines_replaced: int = 0
+    lines_added: int = 0
+    noise_dropped: int = 0
+
+
+def _block_lines(block: Block, inside: list[tuple[OcrElement, list[OcrElement]]], keep_ratio: float,
+                 stats: MergeStats, drop: set[int]) -> list[OcrElement]:
+    """The block's lines in reading order; Tesseract's words they replace go into `drop`.
+
+    Empty if Tesseract read every line as Mistral did: the block stays as it is.
+    """
+    boxes = [_union([w.bbox for w in words]) for _, words in inside]
+    readings = [" ".join(w.text for w in words) for _, words in inside]
+    shared = assign(readings, block.text.split())
+    pitch = _pitch(boxes)
+    new_lines, changed = [], False
+    for index, ((line, words), box, reading, mine) in enumerate(zip(inside, boxes, readings, shared)):
+        # Unmatched words at the end of a line belong to lines Tesseract
+        # missed, if there is room for them before the next line.
+        cut = len(mine)
+        while cut and not mine[cut - 1][1]:
+            cut -= 1
+        own, tail = [w for w, _ in mine[:cut]], [w for w, _ in mine[cut:]]
+        below = boxes[index + 1].top if index + 1 < len(boxes) else block.box.bottom
+        slots = int((below - box.top) / pitch + 0.5) - 1
+        if not (tail and own and slots >= 1):
+            own, tail = own + tail, []
+        text = " ".join(own)
+        if text and agreement(reading, text) >= keep_ratio:
+            stats.lines_kept += 1
+            # Moved along with the block, so the text stays in reading order.
+            new_lines.append(replace(line, children=list(words)))
+        else:
+            changed = True
+            if text:
+                stats.lines_replaced += 1
+                new_lines.append(_line_of_words(text, box))
+        if tail:
+            changed = True
+            right = max(box.right, block.box.right)
+            # Spread evenly over the gap: line spacing on a photographed
+            # page grows towards the bottom.
+            runs = _split(tail, slots)
+            step = (below - box.top) / (len(runs) + 1)
+            for slot, run in enumerate(runs, start=1):
+                top = box.top + slot * step
+                bottom = min(top + box.height, block.box.bottom)
+                if bottom > top:
+                    stats.lines_added += 1
+                    new_lines.append(_line_of_words(" ".join(run), BoundingBox(box.left, top, right, bottom)))
+    if not changed:
+        return []
+    drop.update(id(w) for _, words in inside for w in words)
+    return new_lines
 
 
 def merge(page: OcrElement, blocks: list[Block], keep_ratio: float = KEEP_RATIO) -> tuple[OcrElement, MergeStats]:
-    """`page` (Tesseract) with every block it misread replaced by Mistral's text."""
+    """`page` (Tesseract) with every line it misread replaced by Mistral's text."""
     stats = MergeStats(blocks=len(blocks))
     lines = page.lines
-    replaced: set[int] = set()  # ids of Tesseract words to drop
+    drop: set[int] = set()  # ids of Tesseract words to drop
+    claimed: set[int] = set()  # words inside some block
     added: list[OcrElement] = []
     for block in blocks:
-        inside = [(line, [w for w in line.words if id(w) not in replaced and _center_in(w, block.box)]) for line in lines]
+        inside = [(line, [w for w in line.words if id(w) not in claimed and _center_in(w, block.box)]) for line in lines]
         inside = [(line, words) for line, words in inside if words]
-        reading = " ".join(w.text for _, words in inside for w in words)
-        if inside and agreement(reading, block.text) >= keep_ratio:
-            stats.kept += 1
-            continue
-        stats.replaced += 1
-        for _, words in inside:
-            replaced.update(id(w) for w in words)
-        found = [_union([w.bbox for w in words]) for _, words in inside]
-        new_lines = _layout(block, found)
+        claimed.update(id(w) for _, words in inside for w in words)
+        if inside:
+            new_lines = _block_lines(block, inside, keep_ratio, stats, drop)
+        else:
+            new_lines = _stripes(block)
+            stats.lines_replaced += len(new_lines)
         if new_lines:
             added.append(OcrElement(ocr_class=OcrClass.PARAGRAPH, bbox=_union([l.bbox for l in new_lines]), children=new_lines))
-    if not replaced and not added:
+    if blocks:
+        for w in page.words:
+            if id(w) not in claimed and w.confidence is not None and w.confidence < NOISE_CONFIDENCE:
+                drop.add(id(w))
+                stats.noise_dropped += 1
+    if not drop and not added:
         return page, stats
-    return _without(page, replaced, added), stats
+    return _without(page, drop, added), stats
 
 
 def _without(element: OcrElement, drop: set[int], add: list[OcrElement]) -> OcrElement:

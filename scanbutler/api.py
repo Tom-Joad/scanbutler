@@ -165,14 +165,14 @@ def _result_json(job: dict, folder: Path, pdf: Path) -> dict:
     texts = pdfops.page_texts(pdf)
     pages = []
     for number, text in enumerate(texts, start=1):
-        entry = {"page": number, "text": text, "markdown": None, "blocks_from_mistral": 0}
+        entry = {"page": number, "text": text, "markdown": None, "lines_from_mistral": 0}
         record = mistral / f"page-{number:04d}.json"
         if record.exists():
             info = json.loads(record.read_text(encoding="utf-8"))
             reading = mistral / f"{info['image']}.json"
             if reading.exists():
                 entry["markdown"] = json.loads(reading.read_text(encoding="utf-8")).get("markdown")
-            entry["blocks_from_mistral"] = info.get("replaced", 0)
+            entry["lines_from_mistral"] = info.get("lines_replaced", 0) + info.get("lines_added", 0)
         pages.append(entry)
     return {"id": job["id"], "filename": job["filename"], "pages": pages}
 

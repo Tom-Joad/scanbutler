@@ -108,11 +108,13 @@ class HybridOcrEngine(TesseractOcrEngine):
             "page": page_number + 1,
             "image": hashlib.sha256(Path(input_file).read_bytes()).hexdigest(),
             "blocks": stats.blocks,
-            "kept": stats.kept,
-            "replaced": stats.replaced,
+            "lines_kept": stats.lines_kept,
+            "lines_replaced": stats.lines_replaced,
+            "lines_added": stats.lines_added,
+            "noise_dropped": stats.noise_dropped,
         }
         (folder / f"page-{page_number + 1:04d}.json").write_text(json.dumps(record), encoding="utf-8")
-        log.info("page %d: %d blocks, %d from Mistral", page_number + 1, stats.blocks, stats.replaced)
+        log.info("page %d: %d lines from Mistral, %d kept", page_number + 1, stats.lines_replaced, stats.lines_kept)
         return merged, hybrid.text_of(merged)
 
 

@@ -761,7 +761,7 @@ apply without a restart. A program sees only the jobs it created.
 | `GET /api/v1/jobs` | the program's jobs |
 | `GET /api/v1/jobs/{id}` | `status`: `queued`, `running`, `done` or `failed` (with `error`) |
 | `GET /api/v1/jobs/{id}/result.pdf` | the searchable PDF (`409` until `done`) |
-| `GET /api/v1/jobs/{id}/result.json` | per page: `text` (the text layer), `markdown` (Mistral's reading, with headings and lists), `blocks_from_mistral` |
+| `GET /api/v1/jobs/{id}/result.json` | per page: `text` (the text layer), `markdown` (Mistral's reading, with headings and lists), `lines_from_mistral` |
 | `DELETE /api/v1/jobs/{id}` | `204`; removes the job and its files at once |
 
 The body is the file itself (no form encoding): a PDF, JPEG, PNG, TIFF or
