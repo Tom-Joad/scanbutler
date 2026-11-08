@@ -11,10 +11,11 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 from . import __version__, languages, logging_setup, pdfops
-from .config import ConfigError, Settings, available_cpus, memory_limit_bytes
+from .config import ConfigError, Settings, available_cpus, default_work_dir, memory_limit_bytes
 from .mistral import MistralClient
 from .paperless import client_for
 from .pipeline import process_for_paperless, process_stack, rebuild
+from .tokens import TokenError, TokenStore
 from .watcher import run_all
 
 log = logging.getLogger("scanbutler")
@@ -86,6 +87,28 @@ def _process_one(args: argparse.Namespace, settings: Settings, client: MistralCl
         process_stack(args.pdf, PurePosixPath(args.folder), settings, client, profile)
 
 
+def _token(args: argparse.Namespace) -> int:
+    # Only WORK_DIR matters here; the other settings may be incomplete.
+    work = Path(os.environ["WORK_DIR"]) if os.environ.get("WORK_DIR", "").strip() else default_work_dir(
+        Path(os.environ.get("DATA_DIR", "/data").strip() or "/data")
+    )
+    store = TokenStore(work / "api" / "tokens.json")
+    try:
+        if args.action == "add":
+            print(store.add(args.name))
+            print(f"Token for {args.name!r}; it is not shown again.", file=sys.stderr)
+        elif args.action == "remove":
+            store.remove(args.name)
+            print(f"Token {args.name!r} removed.", file=sys.stderr)
+        else:
+            for known in store.tokens():
+                print(f"{known.name}\t{known.created_at}")
+    except TokenError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="scanbutler", description="Turn scanned paper into named, searchable PDFs.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -102,8 +125,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     again = sub.add_parser("rebuild", help="re-cut a stack from its edited plan.json")
     again.add_argument("work_dir", help="the stack's work directory, absolute or relative to WORK_DIR")
+    token = sub.add_parser("token", help="manage API tokens")
+    token_sub = token.add_subparsers(dest="action", required=True)
+    token_sub.add_parser("add", help="create a token for a program; it is shown once").add_argument("name")
+    token_sub.add_parser("list", help="list the tokens' names")
+    token_sub.add_parser("remove", help="revoke a token").add_argument("name")
     args = parser.parse_args(argv)
     command = args.command or "run"
+
+    if command == "token":
+        return _token(args)
 
     try:
         settings = Settings.from_env(require_api_key=command != "rebuild")
@@ -124,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
             "ocr_priority": [p.name for p in settings.profiles if p.priority],
             "work_retention_days": settings.work_retention_days,
             "paperless_share": list(settings.paperless_share_kinds),
+            "api": settings.api_port if settings.api_enabled else False,
         },
     )
 

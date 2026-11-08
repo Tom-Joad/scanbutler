@@ -41,7 +41,7 @@ def fake_ocrmypdf(monkeypatch, outcomes):
     """Replace ocrmypdf: each call pops (returncode, stderr) and records its options."""
     calls = []
 
-    def run(cmd, capture_output, text, timeout=None):
+    def run(cmd, capture_output, text, timeout=None, env=None):
         calls.append(cmd)
         if cmd[0] == "gs":  # downsampling: always succeeds, writes its output file
             out = next(arg.split("=", 1)[1] for arg in cmd if arg.startswith("-sOutputFile="))
@@ -175,7 +175,7 @@ def test_downsampling_can_be_switched_off(tmp_path, monkeypatch):
 
 
 def test_downsampling_has_a_time_limit(tmp_path, monkeypatch):
-    def hang(cmd, capture_output, text, timeout=None):
+    def hang(cmd, capture_output, text, timeout=None, env=None):
         assert timeout == 60
         raise subprocess.TimeoutExpired(cmd, timeout)
 

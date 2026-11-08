@@ -18,7 +18,8 @@
     the text layer comes from a fresh Tesseract pass. No web UI: progress is in the container
     log, and a review.md per stack in the Work folder lists uncertain splits. An optional third
     input only adds the text layer and uploads to Paperless-ngx. Optionally reports the queue to
-    a webhook such as Home Assistant. Needs a Mistral API key.
+    a webhook such as Home Assistant. An optional HTTP API lets other programs send a file and get
+    back a searchable PDF whose text layer also holds handwriting. Needs a Mistral API key.
   </Overview>
   <Category>Productivity: Tools:</Category>
   <ExtraParams>--security-opt no-new-privileges --memory=4g</ExtraParams>
@@ -49,6 +50,8 @@
   <Config Name="PAPERLESS_SHARE_CORRESPONDENTS" Target="PAPERLESS_SHARE_CORRESPONDENTS" Default="false" Mode="" Description="true: remove the owner from every Paperless correspondent, so all users see them (also who writes to whom). Needs a superuser token." Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="PAPERLESS_SHARE_DOCUMENT_TYPES" Target="PAPERLESS_SHARE_DOCUMENT_TYPES" Default="false" Mode="" Description="true: remove the owner from every Paperless document type, so all users see them. Needs a superuser token." Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="PAPERLESS_SHARE_TAGS_READONLY" Target="PAPERLESS_SHARE_TAGS_READONLY" Default="" Mode="" Description="Optional: comma-separated tag names that keep their owner and are only visible to other users, e.g. ai-processed" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="API_ENABLED" Target="API_ENABLED" Default="false" Mode="" Description="true: HTTP API on the API port; other programs send a file and get a searchable PDF (handwriting via Mistral OCR). Tokens: docker exec scanbutler scanbutler token add NAME" Type="Variable" Display="always" Required="false" Mask="false">false</Config>
+  <Config Name="API port" Target="8080" Default="8484" Mode="tcp" Description="Port of the HTTP API (only used with API_ENABLED=true)" Type="Port" Display="always" Required="false" Mask="false">8484</Config>
   <Config Name="QUEUE_WEBHOOK_URL" Target="QUEUE_WEBHOOK_URL" Default="" Mode="" Description="Optional: POST queue counts here on every change and every 5 minutes, e.g. a Home Assistant webhook (http://HA:8123/api/webhook/ID). See the project README for the sensor config." Type="Variable" Display="always" Required="false" Mask="true"/>
   <Config Name="STACKS_TEXT_SOURCE" Target="STACKS_TEXT_SOURCE" Default="mistral" Mode="" Description="Text for splitting and naming stacks: mistral (Mistral OCR, paid) or tesseract (free, from the text layer)" Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="SCANNER_NAMING" Target="SCANNER_NAMING" Default="on" Mode="" Description="off: scanner files keep their file name and only get the Tesseract text layer, no Mistral" Type="Variable" Display="advanced" Required="false" Mask="false"/>

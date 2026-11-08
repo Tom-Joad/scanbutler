@@ -25,6 +25,10 @@ services:
       # stacks/, scanner/ and paperless/ (see README > Quick start).
       - ${DATA_PATH:-./data}:/data
 
+    # The HTTP API, with API_ENABLED=true in .env (README > HTTP API).
+    # ports:
+    #   - "8484:8080"
+
     # OCR jobs adapt to this limit: less memory makes processing slower, not
     # fail. 4 GB lets all inputs run at once; 1 GB is the tested minimum.
     mem_limit: 4g

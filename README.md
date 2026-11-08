@@ -71,6 +71,7 @@ Under the hood:
 - [Spending limit and paused processing](#spending-limit-and-paused-processing)
 - [Choosing the text source](#choosing-the-text-source)
 - [Paperless-ngx input](#paperless-ngx-input)
+- [HTTP API](#http-api)
 - [Rate limits and cost](#rate-limits-and-cost)
 - [Privacy](#privacy)
 - [Unraid](#unraid)
@@ -378,6 +379,14 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `OCRMYPDF_PAGE_TIMEOUT` | `300` | Seconds Tesseract may spend on one page; the page is kept either way |
 | `OCRMYPDF_FILE_TIMEOUT_MINUTES` | `120` | An ocrmypdf run taking longer is stopped, and the next mode is tried |
 | `OCRMYPDF_SKIP_BIG_MPIXELS` | `200` | Last-resort mode only: pages above this are kept without new OCR |
+
+**HTTP API** (see [HTTP API](#http-api))
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `API_ENABLED` | `false` | `true` starts the API on port 8080 in the container |
+| `API_MAX_UPLOAD_MB` | `100` | Largest file the API accepts |
+| `API_RESULT_HOURS` | `24` | Hours a finished job and its results are kept |
 
 **Throughput, webhook and logging**
 
@@ -716,6 +725,62 @@ kind may then see and change it.
   `correspondents shared`, `document types shared`), never their names.
 - Storage paths and custom fields keep their owners.
 
+## HTTP API
+
+Other programs can hand Scanbutler a file and get back a searchable PDF: a
+recipe app sending a photo of a handwritten recipe card, for example. With
+`API_ENABLED=true` the container answers on port 8080.
+
+The text layer of these PDFs is made for handwriting. Tesseract reads the
+page as usual, and Mistral OCR reads the same page image. Wherever the two
+agree, Tesseract's words stay: they sit exactly on the printed words, so a
+search hit or a selection fits word by word. Where Tesseract misread a
+paragraph (handwriting, faint print), Mistral's reading replaces it, placed
+on the lines Tesseract saw there. Search then finds handwritten words too;
+selecting them marks the line they are on. API jobs use Mistral's direct
+OCR, not the batch API: a page takes seconds and costs the full OCR price
+(well under a cent).
+
+**Tokens.** Every calling program gets its own token. Create it in the
+container; it is shown once:
+
+```bash
+docker exec scanbutler scanbutler token add cookbutler
+docker exec scanbutler scanbutler token list
+docker exec scanbutler scanbutler token remove cookbutler
+```
+
+Only a hash of each token is stored (`/config/api/tokens.json`). Changes
+apply without a restart. A program sees only the jobs it created.
+
+**Jobs.** Send the token as `Authorization: Bearer <token>`.
+
+| Request | Answer |
+|---|---|
+| `POST /api/v1/jobs` (multipart: `file`, optional `callback_url`) | `202`, the job with its `id` |
+| `GET /api/v1/jobs` | the program's jobs |
+| `GET /api/v1/jobs/{id}` | `status`: `queued`, `running`, `done` or `failed` (with `error`) |
+| `GET /api/v1/jobs/{id}/result.pdf` | the searchable PDF (`409` until `done`) |
+| `GET /api/v1/jobs/{id}/result.json` | per page: `text` (the text layer), `markdown` (Mistral's reading, with headings and lists), `blocks_from_mistral` |
+| `DELETE /api/v1/jobs/{id}` | `204`; removes the job and its files at once |
+
+`file` is a PDF, JPEG, PNG, TIFF or WebP. Photos are turned upright by
+their orientation tag. With `callback_url`, Scanbutler posts
+`{"id", "status": "ok"|"failed", "message", "links"}` there when the job is
+finished; the program then fetches the results with its token. Jobs run one
+after the other, ahead of stacks waiting for OCR, and survive a restart.
+Finished jobs are removed after `API_RESULT_HOURS`.
+
+```bash
+TOKEN=sb_...
+curl -H "Authorization: Bearer $TOKEN" -F file=@recipe.jpg http://NAS-IP:8080/api/v1/jobs
+curl -H "Authorization: Bearer $TOKEN" http://NAS-IP:8080/api/v1/jobs/ID
+curl -H "Authorization: Bearer $TOKEN" -o recipe.pdf http://NAS-IP:8080/api/v1/jobs/ID/result.pdf
+```
+
+The API speaks plain HTTP. Keep the port inside your network, or put a
+reverse proxy with HTTPS in front of it.
+
 ## Rate limits and cost
 
 Mistral limits requests per second and tokens per minute. The limits depend
@@ -760,6 +825,9 @@ health or financial records.
 - The Paperless input keeps no copy once a document is confirmed in
   Paperless. Only the register of uploaded originals remains: checksum, file
   name, document id and date.
+- API jobs keep the uploaded file, Mistral's reading and the results in
+  `/config/api/jobs/` until `API_RESULT_HOURS` (24) after they finished, or
+  until the program deletes the job.
 - The queue webhook sends counts only.
 - Languages beyond the built-in ones are downloaded from GitHub (or
   `TESSDATA_URL`) at startup. The request names only the language file.
