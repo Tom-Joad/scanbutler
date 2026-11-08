@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.9.0] - 2026-11-08
 
 ### Added
 - **HTTP API** (`API_ENABLED=true`, port 8080): other programs send a PDF or
@@ -539,6 +539,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.9.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.8.3...v1.9.0
 [1.8.3]: https://github.com/Tom-Joad/scanbutler/compare/v1.8.2...v1.8.3
 [1.8.2]: https://github.com/Tom-Joad/scanbutler/compare/v1.8.1...v1.8.2
 [1.8.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.8.0...v1.8.1
