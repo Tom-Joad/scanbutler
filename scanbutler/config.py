@@ -274,6 +274,12 @@ class Settings:
 
     log_level: str
 
+    # HTTP API for other programs (api.py); off unless API_ENABLED.
+    api_enabled: bool = False
+    api_port: int = 8080
+    api_max_upload_mb: int = 100
+    api_result_hours: float = 24.0
+
     @classmethod
     def from_env(cls, require_api_key: bool = True) -> "Settings":
         api_key = os.environ.get("MISTRAL_API_KEY", "").strip()
@@ -378,11 +384,15 @@ class Settings:
                 )
             if profile.text_source == "tesseract" and not profile.upload and not _bool("OCRMYPDF_ENABLED", True):
                 raise ConfigError(f"{profile.env_prefix}_TEXT_SOURCE=tesseract needs OCRMYPDF_ENABLED=true")
-        if not profiles:
+        api_enabled = _bool("API_ENABLED", False)
+        if not profiles and not api_enabled:
             raise ConfigError("STACKS_ENABLED and SCANNER_ENABLED are both off")
+        if api_enabled and not _bool("OCRMYPDF_ENABLED", True):
+            raise ConfigError("API_ENABLED=true needs OCRMYPDF_ENABLED=true: the API returns a searchable PDF")
         # The key is only needed by inputs that call Mistral: stacks always,
-        # the scanner when it names files, Paperless with TEXT_SOURCE=mistral.
-        needing = [p.name for p in profiles if p.uses_mistral]
+        # the scanner when it names files, Paperless with TEXT_SOURCE=mistral,
+        # and the API, which reads every page with Mistral OCR.
+        needing = [p.name for p in profiles if p.uses_mistral] + (["api"] if api_enabled else [])
         if require_api_key and needing and not api_key:
             raise ConfigError(f"MISTRAL_API_KEY is not set; needed by: {', '.join(needing)}")
         llm_model = _str("MISTRAL_LLM_MODEL", "mistral-large-4-0")
@@ -449,6 +459,10 @@ class Settings:
             queue_webhook_heartbeat_seconds=_int("QUEUE_WEBHOOK_HEARTBEAT_SECONDS", 300, minimum=10),
             work_retention_days=max(0.0, _float("WORK_RETENTION_DAYS", 30.0)),
             log_level=_str("LOG_LEVEL", "INFO"),
+            api_enabled=api_enabled,
+            api_port=_int("API_PORT", 8080, minimum=1),
+            api_max_upload_mb=_int("API_MAX_UPLOAD_MB", 100, minimum=1),
+            api_result_hours=_float("API_RESULT_HOURS", 24.0),
         )
 
     @property

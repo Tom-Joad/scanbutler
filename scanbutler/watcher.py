@@ -339,12 +339,16 @@ def run_all(settings: Settings, backend) -> None:
     ]
     for worker in workers:
         worker.start()
+    if settings.api_enabled:
+        from .api import serve
+
+        serve(settings, stop)
 
     # The main thread keeps the healthcheck heartbeat going; a single stack
     # can take an hour, which must not count as hung. It also clears out old
     # work folders, at start and then every few hours.
     next_cleanup = 0.0
-    while not stop.is_set() and any(worker.is_alive() for worker in workers):
+    while not stop.is_set() and (settings.api_enabled or any(worker.is_alive() for worker in workers)):
         HEARTBEAT.touch()
         if time.monotonic() >= next_cleanup:
             next_cleanup = time.monotonic() + retention.CHECK_SECONDS

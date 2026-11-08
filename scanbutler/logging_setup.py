@@ -53,6 +53,9 @@ class JsonFormatter(logging.Formatter):
                 # ocrmypdf tags every log record with an empty "pageno".
                 if key == "pageno" and value is None:
                     continue
+                # uvicorn repeats its message with terminal colours.
+                if key == "color_message":
+                    continue
                 payload[key] = value
 
         source = _SOURCE.get()

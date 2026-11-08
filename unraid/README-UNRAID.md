@@ -103,6 +103,16 @@ token that has the `read:packages` scope.
   They need a superuser token. See *Shared tags, correspondents and
   document types* in the project README.
 
+### HTTP API
+
+- Set `API_ENABLED=true`. Other programs on your network then reach the API
+  at `http://<server-ip>:8484` (the *API port*).
+- Each program needs a token. Open the container's console (or the Unraid
+  terminal) and run `docker exec scanbutler scanbutler token add <program>`.
+  The token is shown once; copy it into the program's settings.
+- The program sends a PDF or a photo and fetches a searchable PDF whose text
+  layer also holds handwriting. See *HTTP API* in the project README.
+
 ### Failures and pauses
 
 - If a file fails, it moves to the `failed/` folder of its input, next to an

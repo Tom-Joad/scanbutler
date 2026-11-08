@@ -5,8 +5,9 @@
 # keeps the health check's heartbeat going,
 # the OCR tools and language models are installed, and a language beyond
 # the built-in ones is downloaded (or left out when it can't be), and a scan
-# with fax images pikepdf can't decode still gets its text layer. No
-# document is processed and Mistral is never called.
+# with fax images pikepdf can't decode still gets its text layer. The API
+# takes an image and returns a searchable PDF, against a fake Mistral in the
+# container (tests/fake_mistral.py); the real Mistral is never called.
 # Usage: tests/smoke.sh <image>
 # SMOKE_TESSDATA_URL replaces the tessdata_best download URL, e.g. a local
 # mirror where GitHub isn't reachable.
@@ -173,5 +174,24 @@ for secret in "$SECRET" "$PL_SECRET" "$PL2_SECRET"; do
     fi
     if in_log "$secret"; then fail "a secret is in the log"; fi
 done
+
+echo "== the API returns a searchable PDF with Mistral's text where Tesseract read nothing"
+docker rm -f "$NAME" >/dev/null
+docker run -d --name "$NAME" -e PUID="$PUID" -e PGID="$PGID" -e API_ENABLED=true -e MISTRAL_API_KEY="$SECRET" \
+    -e MISTRAL_API_BASE=http://127.0.0.1:8999 -e STACKS_ENABLED=false -e SCANNER_ENABLED=false \
+    -e OCRMYPDF_LANGUAGES=deu -v "$TESTS:/tests:ro" "$IMAGE" >/dev/null
+docker exec -d "$NAME" python3 /tests/fake_mistral.py
+for _ in $(seq 60); do in_log '"event":"api listening"' && break; sleep 1; done
+in_log '"event":"api has no token yet' || fail "no warning about the missing token"
+token=$(docker exec "$NAME" scanbutler token add smoke) || fail "token add failed"
+[[ $token == sb_* ]] || fail "unexpected token: $token"
+docker exec "$NAME" scanbutler token list | grep -q '^smoke' || fail "token list misses the token"
+text=$(docker exec "$NAME" python3 /tests/api_roundtrip.py "$token" 2>&1) || fail "api round trip: $text"
+grep -q "Zimtschnecken" <<<"$text" || fail "the result's text layer lacks Mistral's text: $text"
+[[ $(stat -c %u "$WORK/config/api/tokens.json" 2>/dev/null || docker exec "$NAME" stat -c %u /config/api/tokens.json) == "$PUID" ]] \
+    || fail "tokens.json not owned by PUID"
+[[ $(docker exec "$NAME" stat -c %a /config/api/tokens.json) == 600 ]] || fail "tokens.json readable by others"
+if docker exec "$NAME" grep -rqs "$token" /config /tmp /app; then fail "the API token was written to a file"; fi
+if in_log "$token"; then fail "the API token is in the log"; fi
 
 echo "OK"

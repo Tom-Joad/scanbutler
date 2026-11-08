@@ -5,6 +5,20 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Added
+- **HTTP API** (`API_ENABLED=true`, port 8080): other programs send a PDF or
+  an image and fetch a searchable PDF plus the text per page. Jobs are
+  queued, survive a restart, can report to a `callback_url`, and are removed
+  after `API_RESULT_HOURS` (24). Every program has its own token
+  (`scanbutler token add|list|remove`), stored only as a hash, and sees only
+  its own jobs. See README > HTTP API.
+- **Handwriting in the text layer** of API results: Mistral OCR reads the
+  same page image as Tesseract, and every line Tesseract misread gets
+  Mistral's reading in its place; lines Tesseract missed are added where
+  they belong.
+
 ## [1.8.3] - 2026-11-07
 
 ### Security

@@ -268,6 +268,7 @@ def make_searchable(
     *,
     priority: bool = False,
     chunk_pages: int = 0,
+    env: dict[str, str] | None = None,
 ) -> None:
     """Add an invisible Tesseract text layer so every output PDF is searchable.
 
@@ -289,7 +290,7 @@ def make_searchable(
     if chunk_pages and pages > chunk_pages and not tagged:
         _searchable_in_chunks(src, dst, languages, extra_args, limits, pages, chunk_pages)
     else:
-        _searchable(src, src.name, dst, languages, extra_args, limits, priority, pages, has_text, tagged)
+        _searchable(src, src.name, dst, languages, extra_args, limits, priority, pages, has_text, tagged, env)
 
 
 def _searchable_in_chunks(
@@ -371,6 +372,7 @@ def _searchable(
     pages: int,
     has_text: bool,
     tagged: bool,
+    env: dict[str, str] | None = None,
 ) -> None:
     tmp = dst.with_name(dst.name + ".tmp.pdf")
     log.info("text layer started", extra={"file": name_for_log, "has_text": has_text, "tagged": tagged})
@@ -391,7 +393,7 @@ def _searchable(
             )
     try:
         with JOBS.reserve(pages, priority) as granted:
-            _run_modes(name_for_log, ocr_input, dst, tmp, languages, granted, extra_args, limits, has_text, tagged)
+            _run_modes(name_for_log, ocr_input, dst, tmp, languages, granted, extra_args, limits, has_text, tagged, env)
     finally:
         prepared.unlink(missing_ok=True)
 
@@ -407,6 +409,7 @@ def _run_modes(
     limits: OcrLimits,
     has_text: bool,
     tagged: bool,
+    env: dict[str, str] | None = None,
 ) -> None:
     errors = []
     for name, options in ocr_modes(has_text, tagged):
@@ -423,7 +426,9 @@ def _run_modes(
             str(tmp),
         ]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=limits.file_timeout_minutes * 60)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=limits.file_timeout_minutes * 60, env=env
+            )
         except subprocess.TimeoutExpired:
             result = subprocess.CompletedProcess(
                 cmd, -1, "", f"error: not finished after {limits.file_timeout_minutes} minutes, stopped"

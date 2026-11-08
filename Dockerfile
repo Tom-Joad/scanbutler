@@ -62,6 +62,9 @@ RUN chmod +x /usr/local/bin/scanbutler \
 # Plans, caches, the upload ledger and temporary page images.
 VOLUME /config
 
+# The HTTP API, when API_ENABLED=true.
+EXPOSE 8080
+
 # The watcher touches the heartbeat every 30 s, also while a long stack is
 # being processed.
 HEALTHCHECK --interval=60s --timeout=5s --start-period=90s --retries=3 \
