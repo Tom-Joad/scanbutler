@@ -2,7 +2,7 @@
 """Daily security watch for a published image.
 
 Opens one GitHub issue per finding and never builds, tags or releases
-anything. Three checks:
+anything. Four checks, then the release pull request:
 
 1. Trivy report (HIGH/CRITICAL with a fix), read from TRIVY_JSON.
 2. Distribution updates: security updates (Debian) or updates of the big
@@ -12,13 +12,13 @@ anything. Three checks:
    curl or Git that is newer than what the image has, before the
    distribution ships it. Alpine images only: Debian backports fixes without
    changing the version, so comparing versions would raise false alarms.
-5. Bundled libraries: C libraries that Python wheels carry in their own
+4. Bundled libraries: C libraries that Python wheels carry in their own
    `<package>.libs/` folder (Pillow's brotli, libpng, FreeType ...), which
    neither Trivy nor the distribution sees. Their version is read from the
    library itself and compared with Alpine's security database (edge), which
    lists the upstream version of every fix. Any distribution.
 
-4. Release pull request: when the distribution already ships a fix (checks
+Release pull request: when the distribution already ships a fix (checks
    1 and 2), or when main has unreleased changes (an `[Unreleased]` entry
    in the changelog, or Dependabot updates since the last tag that change
    more than `.github/`), a pull request `security-release` prepares the
@@ -32,7 +32,9 @@ anything. Three checks:
 
 An issue is opened once per finding: if an issue with the same title exists,
 open or closed, nothing happens. Closing an issue without fixing it
-therefore silences that finding for good.
+therefore silences that finding for good. An "available" issue (checks 1
+and 2) is closed by the watch itself once the published image no longer
+has the finding, so only a fixed image closes it, never the merge alone.
 
 A source that can't be reached only gives a warning. After three runs in a
 row without it, an issue says so. The count is kept in STATE_DIR, which the
@@ -46,6 +48,7 @@ CHANGELOG.md), VERSION_FILES (space separated), TAG_PREFIX (default "v").
 Standard library only.
 """
 
+import functools
 import html
 import json
 import os
@@ -127,6 +130,50 @@ def apk_key(v):
     return vt(m.group(1)), int(m.group(2) or 0)
 
 
+def deb_cmp(a, b):
+    """Compare two Debian versions (epoch:upstream-revision) like dpkg."""
+    def split(v):
+        epoch, _, rest = v.rpartition(":")
+        upstream, _, revision = rest.rpartition("-") if "-" in rest else (rest, "", "0")
+        return int(epoch or 0), upstream, revision
+
+    def order(c):
+        if c == "~":
+            return -1
+        if c.isalpha():
+            return ord(c)
+        return ord(c) + 256
+
+    def part(x, y):
+        while x or y:
+            nx = re.match(r"^[^0-9]*", x).group(0)
+            ny = re.match(r"^[^0-9]*", y).group(0)
+            for i in range(max(len(nx), len(ny))):
+                cx = order(nx[i]) if i < len(nx) else 0
+                cy = order(ny[i]) if i < len(ny) else 0
+                if cx != cy:
+                    return -1 if cx < cy else 1
+            x, y = x[len(nx):], y[len(ny):]
+            dx = re.match(r"^[0-9]*", x).group(0)
+            dy = re.match(r"^[0-9]*", y).group(0)
+            if int(dx or 0) != int(dy or 0):
+                return -1 if int(dx or 0) < int(dy or 0) else 1
+            x, y = x[len(dx):], y[len(dy):]
+        return 0
+
+    ea, ua, ra = split(a)
+    eb, ub, rb = split(b)
+    if ea != eb:
+        return -1 if ea < eb else 1
+    return part(ua, ub) or part(ra, rb)
+
+
+def pkg_key(distro):
+    """Sort key for the distribution's package versions: Debian revisions
+    (+deb13u7, +deb13u8) differ only after the numbers vt() keeps."""
+    return functools.cmp_to_key(deb_cmp) if distro == "debian" else apk_key
+
+
 def branch(v, parts=2):
     return vt(v)[:parts]
 
@@ -189,11 +236,14 @@ find / -xdev \( -path /proc -o -path /sys \) -prune -o -type f -path '*-packages
   | "$PY" /tmp/bundled.py 2>/dev/null
 fi
 echo ---UPGRADES
+# The last command decides the script's exit code: a failed index update is
+# reported as a line, not as an error that would end the whole run.
 if command -v apk >/dev/null; then
-  apk update -q >/dev/null 2>&1 && apk list -u 2>/dev/null
+  if apk update -q >/dev/null 2>&1; then apk list -u 2>/dev/null; else echo INDEX-UNREACHABLE; fi
 elif command -v apt-get >/dev/null; then
-  apt-get update -qq >/dev/null 2>&1 && apt list --upgradable 2>/dev/null
+  if apt-get update -qq >/dev/null 2>&1; then apt list --upgradable 2>/dev/null; else echo INDEX-UNREACHABLE; fi
 fi
+true
 """
 
 
@@ -229,13 +279,13 @@ def inventory():
 # --- check 1: Trivy ------------------------------------------------------------
 
 
-def choose_fix(fixed, installed):
+def choose_fix(fixed, installed, key):
     """'1.26.10, 1.27.3' for v1.26.7 -> '1.26.10' (same line first)."""
     opts = [o.strip() for o in fixed.split(",") if o.strip()]
     v = vt(installed)
     same = [o for o in opts if vt(o)[:2] == v[:2]]
-    newer = [o for o in opts if vt(o) > v]
-    return min(same or newer or opts, key=vt)
+    newer = [o for o in opts if key(o) > key(installed)]
+    return min(same or newer or opts, key=key)
 
 
 def cve_line(v):
@@ -256,6 +306,7 @@ def trivy_findings(inv):
         warn("no Trivy report")
         return []
     distro = inv["distro"].capitalize() or "the distribution"
+    key = pkg_key(inv["distro"])
     out = []
     for result in json.load(open(TRIVY_JSON)).get("Results") or []:
         vulns = [v for v in result.get("Vulnerabilities") or [] if v.get("FixedVersion")]
@@ -267,7 +318,7 @@ def trivy_findings(inv):
             for v in vulns:
                 groups.setdefault((v["PkgName"], v["InstalledVersion"]), []).append(v)
             for (pkg, installed), vs in sorted(groups.items()):
-                fix = max((choose_fix(v["FixedVersion"], installed) for v in vs), key=apk_key)
+                fix = max((choose_fix(v["FixedVersion"], installed, key) for v in vs), key=key)
                 ids = sorted({v["VulnerabilityID"] for v in vs})
                 out.append({
                     "release": f"`{pkg}` {fix} ({', '.join(ids)})",
@@ -299,8 +350,10 @@ def trivy_findings(inv):
 # --- check 2: distribution updates ----------------------------------------------
 
 
+@source("package index")
 def upgrade_findings(inv):
-    checked_sources.add("package index")
+    if "INDEX-UNREACHABLE" in inv["upgrades"]:
+        raise RuntimeError("the index couldn't be updated")
     out = []
     if inv["distro"] == "alpine":
         # nginx-1.30.6-r0 x86_64 {nginx} (BSD-2-Clause) [upgradable from: nginx-1.30.4-r1]
@@ -318,11 +371,6 @@ def upgrade_findings(inv):
             m = rx.match(line)
             if m and "security" in m.group(2):
                 out.append((m.group(1), m.group(3), m.group(4), "Debian security", []))
-    if not inv["upgrades"].strip() and inv["distro"] in ("alpine", "debian"):
-        # Either nothing to upgrade or the index couldn't be fetched; apk and
-        # apt print nothing in both cases. An up-to-date image is the normal
-        # case, so this is not counted as a failure.
-        pass
     return [{
         "key": f"{pkg} {new} available",
         "title": f"Security: {pkg} {new} available (image has {old})",
@@ -721,7 +769,8 @@ RELEASE_LABEL = "security-release"
 CHANGELOG = os.environ.get("CHANGELOG", "CHANGELOG.md")
 VERSION_FILES = os.environ.get("VERSION_FILES", "").split()
 TAG_PREFIX = os.environ.get("TAG_PREFIX", "v")
-HEADING = re.compile(r"^## \[?(\d+\.\d+\.\d+)\]?(?: - \S+)?\s*$", re.M)
+# A released version has a date; "## [1.1.0] - Unreleased" is not released.
+HEADING = re.compile(r"^## \[?(\d+\.\d+\.\d+)\]? - \d{4}-\d{2}-\d{2}\s*$", re.M)
 
 
 def bump(version, unreleased):
@@ -731,12 +780,16 @@ def bump(version, unreleased):
     return f"{major}.{minor}.{patch + 1}"
 
 
-UNRELEASED = re.compile(r"^## \[?Unreleased\]?\s*\n(.*?)(?=^## )", re.M | re.S)
+# "## [Unreleased]", or a planned version "## [1.1.0] - Unreleased".
+UNRELEASED = re.compile(
+    r"^## (?:\[?(\d+\.\d+\.\d+)\]? - )?\[?Unreleased\]?\s*\n(.*?)(?=^## )",
+    re.M | re.S | re.I)
+UNRELEASED_LINK = re.compile(r"^\[Unreleased\]: \S+\s*\n?", re.M | re.I)
 
 
 def unreleased_body(text):
     m = UNRELEASED.search(text)
-    return m.group(1).strip("\n") if m else ""
+    return m.group(2).strip("\n") if m else ""
 
 
 def add_to_section(body, section, intro, lines):
@@ -786,7 +839,9 @@ def new_changelog(text, lines, repo, updates=()):
     bracket = m.group(0).startswith("## [")
     unrel = UNRELEASED.search(text)
     body = unreleased_body(text)
-    new = bump(old, body)
+    planned = unrel.group(1) if unrel else None
+    # A version planned by hand wins when it is newer than the last release.
+    new = planned if planned and vt(planned) > vt(old) else bump(old, body)
     if updates:
         body = add_to_section(body, "Changed", "- Updated dependencies:\n", updates)
     if lines:
@@ -799,6 +854,8 @@ def new_changelog(text, lines, repo, updates=()):
         text = text[:unrel.start()] + entry + text[unrel.end():]
     else:
         text = text[:m.start()] + entry + text[m.start():]
+    # An "[Unreleased]: …compare/vOLD...HEAD" link has no heading any more.
+    text = UNRELEASED_LINK.sub("", text)
     # Link definitions go newest first, above the previous version's. When
     # that one is missing, the topmost one marks the place; looking only for
     # the previous version's link stopped all later links once one was gone
@@ -821,13 +878,14 @@ def bump_version_files(old, new):
         if os.path.basename(path) == "VERSION":
             text = text.replace(old, new, 1)
         else:
-            # Only lines that name the version (`__version__ = "1.2.3"`,
-            # `version: "1.2.3"`), not every occurrence of the number.
-            text = re.sub(rf"^(.*version.*){re.escape(old)}(.*)$",
-                          lambda m: m.group(1) + new + m.group(2),
-                          text, count=1, flags=re.M | re.I)
-        if new not in text:
-            raise RuntimeError(f"{path}: version {old} not found")
+            # Only the line whose key is the version (`__version__ = "1.2.3"`,
+            # `VERSION = "1.2.3"`, `version: "1.2.3"`, `"version": "1.2.3"`),
+            # and the number as a whole: not `node_version: 21.0.1`.
+            text, n = re.subn(
+                rf"""^(\s*["']?(?:__version__|version)["']?\s*[:=]\s*["']?){re.escape(old)}(?![\w.])""",
+                lambda m: m.group(1) + new, text, count=1, flags=re.M | re.I)
+            if not n:
+                raise RuntimeError(f"{path}: no version line with {old}")
         open(path, "w").write(text)
 
 
@@ -890,7 +948,9 @@ def release_pr(items):
             f"`{TAG_PREFIX}{new}`, creates the GitHub release and the build "
             "publishes the image. Installations with automatic updates get it "
             "right after.\n\nChangelog entry:\n\n" + notes + "\n\n"
-            + "".join(f"Closes #{n}\n" for n in closes)
+            + ("Fixes the findings in " + ", ".join(f"#{n}" for n in closes)
+               + ". They stay open until the published image has the fix; "
+               "the next run of the watch closes them then.\n" if closes else "")
             + "\n---\nOpened by the daily security watch. Close it without "
             "merging to skip this release (until main changes again).")
     title = f"Release {new}" + (": security updates" if lines else "")
@@ -907,7 +967,8 @@ def publish_release():
     version = m.group(1)
     end = re.compile(r"^## ", re.M).search(text, m.end())
     notes = text[m.end():end.start() if end else len(text)].strip()
-    notes = re.sub(r"^\[\d+\.\d+\.\d+\]: \S+\s*$", "", notes, flags=re.M).strip()
+    notes = re.sub(r"^\[\d+\.\d+\.\d+\]: \S+\s*$", "", UNRELEASED_LINK.sub("", notes),
+                   flags=re.M).strip()
     tag = f"{TAG_PREFIX}{version}"
     if subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag}"],
                       capture_output=True).returncode == 0:
@@ -968,9 +1029,6 @@ def main():
 
     if not merged:
         print("Nothing found.")
-        if not DRY_RUN:
-            release_pr([])
-        return
     issues = [] if DRY_RUN else existing_issues()
     if not DRY_RUN:
         ensure_label()
@@ -1004,7 +1062,26 @@ def main():
             if f.get("release") and release_items:
                 release_items[-1]["issues"].append(int(url.rsplit("/", 1)[1]))
     if not DRY_RUN:
+        close_fixed(issues, merged)
         release_pr(release_items)
+
+
+def close_fixed(issues, merged):
+    """Close "available" issues the published image no longer has.
+
+    Only when both sources that open them were read in this run: a missing
+    finding is no proof of a fix while Trivy or the package index failed."""
+    if failed_sources & {"Trivy", "package index"}:
+        return
+    current = {stem(f["title"]) for f in merged.values()}
+    for i in issues:
+        name = stem(i["title"])
+        if i["state"] == "OPEN" and name.startswith("Security: ") and name.endswith(" available") \
+                and name not in current:
+            gh("issue", "close", str(i["number"]), "--reason", "completed", "--comment",
+               f"The published image `{IMAGE}` no longer has this finding "
+               "(checked by the daily security watch).")
+            print(f"Closed (fixed in the image): {i['title']}")
 
 
 if __name__ == "__main__":

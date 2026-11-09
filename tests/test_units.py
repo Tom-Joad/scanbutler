@@ -257,3 +257,16 @@ def test_numeric_settings_accept_their_limits(monkeypatch, valid_env):
         monkeypatch.setenv(name, value)
     settings = Settings.from_env()
     assert settings.max_rps == 0 and settings.api_port == 65535 and settings.blank_max_ink == 1
+
+
+def test_check_config_reports_a_bad_setting_in_one_line(monkeypatch, capsys, tmp_path):
+    from scanbutler.__main__ import main
+
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    assert main(["check-config"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("MISTRAL_API_KEY is not set") and err.count("\n") == 1
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    assert main(["check-config"]) == 0
+    assert capsys.readouterr() == ("", "")

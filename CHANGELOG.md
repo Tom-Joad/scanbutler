@@ -26,6 +26,15 @@ layout, a changed webhook payload) only comes with a new major version.
 - `WORK_RETENTION_DAYS` accepts again what 1.9.0 accepted: a fraction is
   rounded and a negative value counts as 0, with a `setting adjusted`
   warning. 1.9.1 stopped with `config_invalid` for these values.
+- A wrong or missing setting now stops the container with one message
+  (`ERROR: MISTRAL_API_KEY is not set; …`) instead of leaving it `running`
+  and logging `config_invalid` every second. The check runs in the init
+  step.
+- After a changed `PUID`/`PGID`, or a `/config` restored from another host,
+  everything below `/config` is handed over to the service user at start.
+  Before, the service could not read its own files; with the API on it
+  crashed at start in a loop. When nothing changed, the start only looks
+  for files with another owner.
 
 ## [1.9.1] - 2026-11-08
 
@@ -247,7 +256,6 @@ register are recognised before any OCR or upload, so this costs nothing.
 
 ## [1.3.1] - 2026-10-04
 
-### Fixed
 - OCR no longer fails with `Permission denied: '/root/.fonts'` on pages
   that need a system font. The watcher, and `docker exec … scanbutler`,
   ran as `abc` with root's home folder, which `abc` may not read; their
