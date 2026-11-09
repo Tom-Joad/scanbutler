@@ -20,6 +20,15 @@ layout, a changed webhook payload) only comes with a new major version.
 - When ocrmypdf runs into `OCRMYPDF_FILE_TIMEOUT_MINUTES`, its worker
   processes and the programs they started are stopped as well, before the
   next mode starts. Before, they could keep running and use memory twice.
+- A wrong or missing setting now stops the container with one message
+  (`ERROR: MISTRAL_API_KEY is not set; …`) instead of leaving it `running`
+  and logging `config_invalid` every second. The check runs in the init
+  step.
+- After a changed `PUID`/`PGID`, or a `/config` restored from another host,
+  everything below `/config` is handed over to the service user at start.
+  Before, the service could not read its own files; with the API on it
+  crashed at start in a loop. When nothing changed, the start only looks
+  for files with another owner.
 
 ## [1.9.1] - 2026-11-08
 
