@@ -6,6 +6,7 @@ tuning knobs all come from the container's environment (see .env.example).
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,7 +25,7 @@ def _str(name: str, default: str) -> str:
     return value or default
 
 
-def _int(name: str, default: int, minimum: int = 0) -> int:
+def _int(name: str, default: int, minimum: int = 0, maximum: int | None = None) -> int:
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
@@ -34,17 +35,60 @@ def _int(name: str, default: int, minimum: int = 0) -> int:
         raise ConfigError(f"{name} must be an integer, got {raw!r}") from exc
     if value < minimum:
         raise ConfigError(f"{name} must be >= {minimum}, got {value}")
+    if maximum is not None and value > maximum:
+        raise ConfigError(f"{name} must be <= {maximum}, got {value}")
     return value
 
 
-def _float(name: str, default: float) -> float:
+def _number(name: str, raw: str) -> float:
+    """A finite number; `nan` and `inf` parse as floats but are never meant."""
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{name} must be a number, got {raw!r}") from exc
+    if not math.isfinite(value):
+        raise ConfigError(f"{name} must be a finite number, got {raw!r}")
+    return value
+
+
+def _float(
+    name: str,
+    default: float,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    above: float | None = None,
+) -> float:
+    """A finite number; `minimum`/`maximum` are inclusive, `above` is exclusive."""
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
-    try:
-        return float(raw)
-    except ValueError as exc:
-        raise ConfigError(f"{name} must be a number, got {raw!r}") from exc
+    value = _number(name, raw)
+    if above is not None and value <= above:
+        raise ConfigError(f"{name} must be > {above:g}, got {raw!r}")
+    if minimum is not None and value < minimum:
+        raise ConfigError(f"{name} must be >= {minimum:g}, got {raw!r}")
+    if maximum is not None and value > maximum:
+        raise ConfigError(f"{name} must be <= {maximum:g}, got {raw!r}")
+    return value
+
+
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+
+def _retention_days(notes: list[str]) -> int:
+    """WORK_RETENTION_DAYS as 1.9.0 read it: fractions round, negatives mean 0.
+
+    Until the next major version, so that an automatic update doesn't stop a
+    container over a value the previous version took; `notes` gets what to warn about.
+    """
+    raw = os.environ.get("WORK_RETENTION_DAYS", "").strip()
+    if not raw:
+        return 30
+    value = _number("WORK_RETENTION_DAYS", raw)
+    days = max(0, math.floor(value + 0.5))
+    if days != value:
+        notes.append(f"WORK_RETENTION_DAYS={raw} is not a whole number of days 0 or more; using {days}")
+    return days
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -270,7 +314,7 @@ class Settings:
     queue_webhook_url: str
     queue_webhook_check_seconds: int
     queue_webhook_heartbeat_seconds: int
-    work_retention_days: float
+    work_retention_days: int
 
     log_level: str
 
@@ -279,6 +323,8 @@ class Settings:
     api_port: int = 8080
     api_max_upload_mb: int = 100
     api_result_hours: float = 24.0
+    # Things to warn about once logging is set up (loading the settings runs before).
+    notes: tuple[str, ...] = field(default=(), repr=False)
 
     @classmethod
     def from_env(cls, require_api_key: bool = True) -> "Settings":
@@ -374,9 +420,7 @@ class Settings:
         ):
             if on and not paperless_url:
                 raise ConfigError(f"{name} needs PAPERLESS_URL and PAPERLESS_TOKEN")
-        share_minutes = _float("PAPERLESS_SHARE_TAGS_MINUTES", 1.0)
-        if share_minutes <= 0:
-            raise ConfigError(f"PAPERLESS_SHARE_TAGS_MINUTES must be > 0, got {share_minutes}")
+        share_minutes = _float("PAPERLESS_SHARE_TAGS_MINUTES", 1.0, above=0)
         for profile in profiles:
             if profile.text_source not in {"mistral", "tesseract"}:
                 raise ConfigError(
@@ -385,10 +429,12 @@ class Settings:
             if profile.text_source == "tesseract" and not profile.upload and not _bool("OCRMYPDF_ENABLED", True):
                 raise ConfigError(f"{profile.env_prefix}_TEXT_SOURCE=tesseract needs OCRMYPDF_ENABLED=true")
         api_enabled = _bool("API_ENABLED", False)
-        result_hours = _float("API_RESULT_HOURS", 24.0)
-        if result_hours < 1:
-            # Less would remove results before a program polling now and then fetches them.
-            raise ConfigError(f"API_RESULT_HOURS must be at least 1, got {result_hours}")
+        # Less than an hour would remove results before a program polling now and then fetches them.
+        result_hours = _float("API_RESULT_HOURS", 24.0, minimum=1)
+        log_level = _str("LOG_LEVEL", "INFO").upper()
+        if log_level not in LOG_LEVELS:
+            raise ConfigError(f"LOG_LEVEL must be one of {', '.join(LOG_LEVELS)}, got {log_level!r}")
+        notes: list[str] = []
         if not profiles and not api_enabled:
             raise ConfigError("STACKS_ENABLED and SCANNER_ENABLED are both off")
         if api_enabled and not _bool("OCRMYPDF_ENABLED", True):
@@ -408,8 +454,8 @@ class Settings:
             # Large 4 always reasons, and low is enough here; Large 3 and most
             # other models reject the parameter, so it is not sent for them.
             reasoning_effort=_str("MISTRAL_REASONING_EFFORT", "low" if llm_model.startswith("mistral-large-4") else ""),
-            request_timeout=_float("MISTRAL_TIMEOUT", 300.0),
-            max_rps=_float("MISTRAL_MAX_RPS", 1.0),
+            request_timeout=_float("MISTRAL_TIMEOUT", 300.0, above=0),
+            max_rps=_float("MISTRAL_MAX_RPS", 1.0, minimum=0),
             profiles=tuple(profiles),
             work_dir=Path(os.environ["WORK_DIR"]) if os.environ.get("WORK_DIR", "").strip() else default_work_dir(data),
             poll_interval=_int("POLL_INTERVAL", 30, minimum=1),
@@ -417,16 +463,16 @@ class Settings:
             ocr_chunk_pages=_int("OCR_CHUNK_PAGES", 50, minimum=1),
             ocr_mode=ocr_mode,
             batch_poll_seconds=_int("BATCH_POLL_SECONDS", 15, minimum=1),
-            batch_max_wait_hours=_float("BATCH_MAX_WAIT_HOURS", 24.0),
+            batch_max_wait_hours=_float("BATCH_MAX_WAIT_HOURS", 24.0, above=0),
             ocr_concurrency=_int("OCR_CONCURRENCY", 3, minimum=1),
             llm_concurrency=_int("LLM_CONCURRENCY", 4, minimum=1),
             boundary_window=window,
             boundary_step=step,
-            review_confidence=_float("REVIEW_CONFIDENCE", 0.75),
+            review_confidence=_float("REVIEW_CONFIDENCE", 0.75, minimum=0, maximum=1),
             drop_blank_pages=_bool("DROP_BLANK_PAGES", True),
             blank_max_chars=_int("BLANK_MAX_CHARS", 15),
             # Percent of the page area: blank scans measure 0-0.2 %, a sparse text page about 1 %.
-            blank_max_ink=_float("BLANK_MAX_INK_PERCENT", 0.2) / 100,
+            blank_max_ink=_float("BLANK_MAX_INK_PERCENT", 0.2, minimum=0, maximum=100) / 100,
             metadata_max_chars=_int("METADATA_MAX_CHARS", 24000, minimum=1000),
             title_language=_str("TITLE_LANGUAGE", "the language of the document"),
             filename_pattern=pattern,
@@ -447,10 +493,10 @@ class Settings:
                 skip_big_mpixels=_int("OCRMYPDF_SKIP_BIG_MPIXELS", 200, minimum=1),
                 max_image_dpi=_int("OCRMYPDF_MAX_IMAGE_DPI", 600, minimum=0),
             ),
-            pause_retry_minutes=_float("PAUSE_RETRY_MINUTES", 30.0),
+            pause_retry_minutes=_float("PAUSE_RETRY_MINUTES", 30.0, above=0),
             paperless_url=paperless_url,
             paperless_token=paperless_token,
-            paperless_max_wait_minutes=_float("PAPERLESS_MAX_WAIT_MINUTES", 30.0),
+            paperless_max_wait_minutes=_float("PAPERLESS_MAX_WAIT_MINUTES", 30.0, above=0),
             paperless_share_tags=share_tags,
             paperless_share_correspondents=share_correspondents,
             paperless_share_document_types=share_document_types,
@@ -461,12 +507,13 @@ class Settings:
             queue_webhook_url=os.environ.get("QUEUE_WEBHOOK_URL", "").strip(),
             queue_webhook_check_seconds=_int("QUEUE_WEBHOOK_CHECK_SECONDS", 10, minimum=1),
             queue_webhook_heartbeat_seconds=_int("QUEUE_WEBHOOK_HEARTBEAT_SECONDS", 300, minimum=10),
-            work_retention_days=float(_int("WORK_RETENTION_DAYS", 30, minimum=0)),
-            log_level=_str("LOG_LEVEL", "INFO"),
+            work_retention_days=_retention_days(notes),
+            log_level=log_level,
             api_enabled=api_enabled,
-            api_port=_int("API_PORT", 8080, minimum=1),
+            api_port=_int("API_PORT", 8080, minimum=1, maximum=65535),
             api_max_upload_mb=_int("API_MAX_UPLOAD_MB", 100, minimum=1),
             api_result_hours=result_hours,
+            notes=tuple(notes),
         )
 
     @property

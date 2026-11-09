@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import tempfile
+import traceback
 from pathlib import Path, PurePosixPath
 
 from . import __version__, languages, logging_setup, pdfops
@@ -116,6 +117,18 @@ def _token(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the command; whatever escapes becomes one JSON log line and exit code 1."""
+    try:
+        return _main(argv)
+    except Exception:  # noqa: BLE001 - the last line of defence
+        if not logging.getLogger().handlers:
+            logging_setup.configure("INFO", sys.stderr)
+        log.exception("crashed")
+        log.debug("crash traceback", extra={"traceback": traceback.format_exc()})
+        return 1
+
+
+def _main(argv: list[str] | None) -> int:
     parser = argparse.ArgumentParser(prog="scanbutler", description="Turn scanned paper into named, searchable PDFs.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = parser.add_subparsers(dest="command")
@@ -141,15 +154,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "token":
         return _token(args)
+    # The interactive commands print their result on stdout; the log goes
+    # to stderr there. `run` logs to stdout, where the container log reads it.
+    stream = None if command == "run" else sys.stderr
 
     try:
         settings = Settings.from_env(require_api_key=command != "rebuild")
     except ConfigError as exc:
         # A JSON line like every other; LOG_LEVEL itself may be what's wrong.
-        logging_setup.configure("INFO")
+        logging_setup.configure("INFO", stream)
         log.error("config_invalid", extra={"reason": str(exc)})
         return 2
-    logging_setup.configure(settings.log_level)
+    logging_setup.configure(settings.log_level, stream)
+    for note in settings.notes:
+        log.warning("setting adjusted", extra={"note": note})
     pdfops.configure_jobs(settings.ocrmypdf_jobs)
     memory = memory_limit_bytes()
     log.info(

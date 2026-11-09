@@ -340,7 +340,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `SCANNER_NAMING` | `on` | `off`: scanner files keep their file name and get only the Tesseract text layer; no Mistral, see [OCR only, without Mistral](#ocr-only-without-mistral) |
 | `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` | `mistral` / `tesseract` | Text for splitting and naming: `mistral` (Mistral OCR) or `tesseract` (free, from the text layer). The scanner falls back to `mistral` when `OCRMYPDF_ENABLED=false` |
 | `WORK_DIR` | `/config` | OCR results, plans and review files |
-| `WORK_RETENTION_DAYS` | `30` | Days after which the work folder of a processed file is deleted; `rebuild` works until then. A `rebuild` restarts the count. `0` keeps everything |
+| `WORK_RETENTION_DAYS` | `30` | Days after which the work folder of a processed file is deleted; `rebuild` works until then. A `rebuild` restarts the count. `0` keeps everything. A fraction is rounded and a negative value counts as 0, with a warning in the log |
 | `TMPDIR` | `$WORK_DIR/tmp` | Temporary page images, several GB for a large stack; on disk, not in RAM |
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
 | `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up. A PDF that isn't completely written (no `%%EOF` at its end), or an empty one, waits up to 10 minutes longer and then moves to `failed/`. Any file still waiting after 10 minutes is named once in the log as `file still waiting`, with the reason |
@@ -417,7 +417,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `QUEUE_WEBHOOK_URL` | — | Report queue counts here, see [below](#queue-webhook-home-assistant) |
 | `QUEUE_WEBHOOK_CHECK_SECONDS` | `10` | How often the queue is counted |
 | `QUEUE_WEBHOOK_HEARTBEAT_SECONDS` | `300` | Resend interval without changes |
-| `LOG_LEVEL` | `INFO` | Logs are JSON lines on stdout. Every line logged while a file is being worked on names it in `source` (folder and name below the inbox) |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. Logs are JSON lines on stdout (on stderr for `process`, `rebuild` and `token`, so their result on stdout stays clean). Every line logged while a file is being worked on names it in `source` (folder and name below the inbox) |
 
 ## Languages
 
