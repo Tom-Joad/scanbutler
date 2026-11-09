@@ -24,9 +24,8 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
-from PIL import Image, ImageOps
 
-from . import __version__, logging_setup, pdfops, priority
+from . import __version__, images, logging_setup, pdfops, priority
 from .config import Settings
 from .fileio import write_json
 from .ocr_plugin import HYBRID_DIR, HYBRID_RATE
@@ -47,7 +46,6 @@ _MAGIC = [
 ]
 CALLBACK_DELAYS = (2, 5)
 LEFTOVER_SECONDS = 3600
-MAX_PAGE_INCHES = 16.5
 
 
 def _now() -> str:
@@ -61,30 +59,6 @@ def sniff(head: bytes) -> str | None:
     if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
         return "webp"
     return None
-
-
-def image_to_pdf(src: Path, dst: Path) -> None:
-    """A PDF of the image's pages, upright, at its stated or an A4-like resolution."""
-    with Image.open(src) as image:
-        frames = []
-        for index in range(getattr(image, "n_frames", 1)):
-            image.seek(index)
-            frame = ImageOps.exif_transpose(image.copy())
-            frames.append(frame.convert("L" if frame.mode in ("1", "L", "LA", "I;16") else "RGB"))
-        dpi = image.info.get("dpi")
-    longest = max(frames[0].size)
-    stated = float(dpi[0]) if dpi and dpi[0] else 0.0
-    # A scanner states its resolution; phones and cameras write 72 dpi or
-    # nothing, which would make a 4000-pixel photo a 55-inch page that OCR
-    # reads as tiny print. Trust the value only if it gives a page up to A3
-    # (16.5 in); otherwise take the long side as A4 (11.7 in).
-    if stated >= 100 and longest / stated <= MAX_PAGE_INCHES:
-        resolution = stated
-    else:
-        resolution = min(600.0, max(150.0, longest / 11.7))
-    tmp = dst.with_name(dst.name + ".tmp")
-    frames[0].save(tmp, "PDF", resolution=resolution, save_all=True, append_images=frames[1:])
-    tmp.replace(dst)
 
 
 class Jobs:
@@ -240,7 +214,7 @@ def process(job: dict, folder: Path, settings: Settings) -> int:
     source = folder / f"input.{job['kind']}"
     pdf = source if job["kind"] == "pdf" else folder / "input.pdf"
     if job["kind"] != "pdf" and not pdf.exists():
-        image_to_pdf(source, pdf)
+        images.to_pdf(source, pdf)
     mistral = folder / "mistral"
     mistral.mkdir(exist_ok=True)
     for record in mistral.glob("page-*.json"):  # from an attempt before a restart
@@ -437,6 +411,13 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
             kind = sniff(head)
             if kind is None:
                 raise HTTPException(415, "send a PDF, JPEG, PNG, TIFF or WebP file")
+            if kind != "pdf":
+                try:
+                    await run_in_threadpool(images.check, upload)
+                except images.ImageRefused as exc:
+                    raise HTTPException(413, str(exc)) from None
+                except Exception:  # noqa: BLE001 - not an image Pillow can read
+                    raise HTTPException(422, "the file is not a readable image") from None
             filename = Path(filename.strip() or f"upload.{kind}").name[:200] or f"upload.{kind}"
             job = await run_in_threadpool(jobs.create, name, filename, kind, upload, callback_url)
         finally:

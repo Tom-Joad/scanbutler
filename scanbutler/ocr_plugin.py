@@ -30,7 +30,7 @@ from ocrmypdf.builtin_plugins.tesseract_ocr import TesseractOcrEngine
 from ocrmypdf.hocrtransform.hocr_parser import HocrParser
 from PIL import Image
 
-from . import hybrid
+from . import hybrid, images
 from .fileio import write_json
 
 log = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def _ocr(body: dict) -> dict:
 def image_body(image: Image.Image) -> dict:
     """An /ocr request for one page image, sent as JPEG (a fraction of the PNG)."""
     buffer = io.BytesIO()
-    image.convert("L" if image.mode in ("1", "L", "LA", "I;16") else "RGB").save(buffer, "JPEG", quality=90)
+    images.to_8bit(image).save(buffer, "JPEG", quality=90)
     return {
         "document": {
             "type": "image_url",

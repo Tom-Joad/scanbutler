@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import PurePosixPath
+
 from PIL import Image, ImageDraw
 
 from scanbutler.boundaries import Decision, _apply_markers
 from scanbutler.ocr import Page
 from scanbutler.pdfops import ink_coverage
+from scanbutler.pipeline import build_plan, keep_name_plan
+
+from .conftest import FakeBackend
 
 
 def test_ink_coverage_separates_blank_tinted_and_text_pages(tmp_path):
@@ -50,3 +56,64 @@ def test_page_k_of_n_never_starts_a_document():
     ]
     result = _apply_markers(pages, model)
     assert [d.starts_new for d in result] == [True, False, True]
+
+
+def _pdf_of(tmp_path, *images):
+    path = tmp_path / "dark.pdf"
+    images[0].save(path, save_all=True, append_images=list(images[1:]), resolution=100)
+    return path
+
+
+def _dark_photo() -> Image.Image:
+    # An X-ray: mostly near-black with a lighter ribcage-like shape.
+    image = Image.new("L", (850, 1100), 18)
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((200, 250, 650, 850), fill=70)
+    draw.rectangle((380, 100, 470, 1000), fill=110)
+    return image
+
+
+def test_dark_pages_count_as_full_of_ink_not_as_empty(tmp_path):
+    black = Image.new("L", (850, 1100), 0)
+    blank = Image.new("L", (850, 1100), 250)
+    path = _pdf_of(tmp_path, black, _dark_photo(), blank)
+
+    coverage = ink_coverage(path)
+
+    assert coverage[0] > 0.9  # a black cover sheet
+    assert coverage[1] > 0.9  # an X-ray
+    assert coverage[2] == 0  # a really blank page stays blank
+
+
+def _pages_with_dark_xrays(tmp_path):
+    text = Image.new("L", (850, 1100), 250)
+    for row in range(20):
+        ImageDraw.Draw(text).rectangle((80, 80 + row * 45, 760, 92 + row * 45), fill=0)
+    path = _pdf_of(tmp_path, text, _dark_photo(), _dark_photo())
+    ink = ink_coverage(path)
+    # No text on the X-rays; Mistral reports an image on them, Tesseract
+    # pages always count as having one.
+    texts = ["LETTER Befund\nText of a real page", "", ""]
+    return [
+        Page(i, text, "", "", i > 0, ink=value) for i, (text, value) in enumerate(zip(texts, ink))
+    ]
+
+
+def test_dark_pages_survive_build_plan(settings, tmp_path):
+    settings = replace(settings, blank_max_ink=0.002)
+    pages = _pages_with_dark_xrays(tmp_path)
+    assert [p.is_blank(settings.blank_max_chars, settings.blank_max_ink) for p in pages] == [False, False, False]
+
+    plan = build_plan(pages, settings, FakeBackend([]), "s.pdf", "abc", PurePosixPath(""))
+
+    assert plan.dropped_pages == ""
+    assert [d.pages for d in plan.documents] == ["1-3"]
+
+
+def test_dark_pages_survive_keep_name_plan(settings, tmp_path):
+    settings = replace(settings, blank_max_ink=0.002)
+    pages = _pages_with_dark_xrays(tmp_path)
+
+    plan = keep_name_plan(pages, settings, "s.pdf", "abc", PurePosixPath(""), "s")
+
+    assert plan.dropped_pages == "" and plan.documents[0].pages == "1-3"
