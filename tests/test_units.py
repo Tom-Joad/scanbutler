@@ -171,3 +171,16 @@ def test_work_retention_days_is_a_whole_number(monkeypatch, tmp_path):
             Settings.from_env()
     monkeypatch.setenv("WORK_RETENTION_DAYS", "0")
     assert Settings.from_env().work_retention_days == 0
+
+
+def test_check_config_reports_a_bad_setting_in_one_line(monkeypatch, capsys, tmp_path):
+    from scanbutler.__main__ import main
+
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    assert main(["check-config"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("MISTRAL_API_KEY is not set") and err.count("\n") == 1
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    assert main(["check-config"]) == 0
+    assert capsys.readouterr() == ("", "")

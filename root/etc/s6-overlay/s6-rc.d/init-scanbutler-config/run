@@ -6,9 +6,15 @@
 mkdir -p /config
 
 if [[ -z ${LSIO_NON_ROOT_USER} ]]; then
-    # Not recursive: a large work folder would make every start slow, and
-    # everything below /config is written by abc anyway.
     lsiown abc:abc /config
+    # Everything below it has to belong to abc too: after a changed PUID/PGID,
+    # or a /config restored from another host, abc couldn't read its own
+    # files (the API's token file crashed the service at start). Looking is
+    # cheap; the recursive hand-over only runs when something is not abc's.
+    if [[ -n $(find /config \( ! -user abc -o ! -group abc \) -print -quit) ]]; then
+        echo "Handing /config over to abc (PUID/PGID changed?)"
+        lsiown -R abc:abc /config
+    fi
 
     # Input roots that Docker created itself (a missing host folder, or a
     # fresh volume) belong to root, and abc couldn't create inbox/ and the
@@ -21,4 +27,17 @@ if [[ -z ${LSIO_NON_ROOT_USER} ]]; then
             lsiown abc:abc "${dir}"
         fi
     done
+fi
+
+# A wrong setting stops the container here, with one message. In the service
+# it would only exit with code 2 and s6 would restart it every second.
+# The check runs as abc, like the service, so it sees what the service sees.
+if [[ -z ${LSIO_NON_ROOT_USER} ]]; then
+    check=(s6-setuidgid abc python3 -m scanbutler check-config)
+else
+    check=(python3 -m scanbutler check-config)
+fi
+if ! reason=$(HOME=/config "${check[@]}" 2>&1); then
+    echo "ERROR: ${reason}"
+    exit 1
 fi
