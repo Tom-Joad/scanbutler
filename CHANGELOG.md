@@ -26,6 +26,18 @@ layout, a changed webhook payload) only comes with a new major version.
 - `WORK_RETENTION_DAYS` accepts again what 1.9.0 accepted: a fraction is
   rounded and a negative value counts as 0, with a `setting adjusted`
   warning. 1.9.1 stopped with `config_invalid` for these values.
+- The service stops (and s6 restarts it) when any of its threads has ended:
+  one input, the API, the queue webhook or the object sharing. Before, it
+  waited until all inputs had died, and the health check kept saying healthy
+  while one inbox was never processed again. The log line names the threads
+  (`threads`).
+- When several scanner or Paperless files are processed at once, an error
+  that escaped (for example a read-only share when moving a file to
+  `failed/`) is logged as `inbox poll failed` with the file; before, it was
+  dropped without a line.
+- When ocrmypdf runs into `OCRMYPDF_FILE_TIMEOUT_MINUTES`, its worker
+  processes and the programs they started are stopped as well, before the
+  next mode starts. Before, they could keep running and use memory twice.
 - A wrong or missing setting now stops the container with one message
   (`ERROR: MISTRAL_API_KEY is not set; …`) instead of leaving it `running`
   and logging `config_invalid` every second. The check runs in the init

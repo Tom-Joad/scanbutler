@@ -57,6 +57,7 @@ def fake_ocrmypdf(monkeypatch, outcomes):
         return subprocess.CompletedProcess(cmd, returncode, "", stderr)
 
     monkeypatch.setattr(pdfops.subprocess, "run", run)
+    monkeypatch.setattr(pdfops, "run_group", lambda cmd, timeout, env=None: run(cmd, True, True, timeout, env))
     return calls
 
 
