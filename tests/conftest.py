@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import logging
+import time
 
 import pikepdf
 import pytest
@@ -115,3 +117,30 @@ def settings(tmp_path, monkeypatch) -> Settings:
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     return Settings.from_env()
+
+
+@pytest.fixture(autouse=True)
+def restore_logging():
+    """main() and logging_setup.configure() replace the root handlers and level; put them back."""
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    yield
+    root.handlers[:] = handlers
+    root.setLevel(level)
+
+
+@pytest.fixture
+def time_zone():
+    """`time_zone("Europe/Berlin")` switches TZ; the original zone is back after the test.
+
+    monkeypatch alone is not enough: it restores TZ only at its own teardown,
+    after a tzset() in the test's finally block has already run.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+
+        def use(name: str) -> None:
+            patch.setenv("TZ", name)
+            time.tzset()
+
+        yield use
+    time.tzset()

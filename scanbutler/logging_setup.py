@@ -70,9 +70,9 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, separators=(",", ":"), default=str, ensure_ascii=False)
 
 
-def configure(level: str = "INFO") -> None:
-    """Install the JSON formatter as the only stdout handler."""
-    handler = logging.StreamHandler(sys.stdout)
+def configure(level: str = "INFO", stream=None) -> None:
+    """Install the JSON formatter as the only handler, on stdout unless `stream` is given."""
+    handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(JsonFormatter())
 
     root = logging.getLogger()
