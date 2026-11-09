@@ -5,6 +5,22 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- The service stops (and s6 restarts it) when any of its threads has ended:
+  one input, the API, the queue webhook or the object sharing. Before, it
+  waited until all inputs had died, and the health check kept saying healthy
+  while one inbox was never processed again. The log line names the threads
+  (`threads`).
+- When several scanner or Paperless files are processed at once, an error
+  that escaped (for example a read-only share when moving a file to
+  `failed/`) is logged as `inbox poll failed` with the file; before, it was
+  dropped without a line.
+- When ocrmypdf runs into `OCRMYPDF_FILE_TIMEOUT_MINUTES`, its worker
+  processes and the programs they started are stopped as well, before the
+  next mode starts. Before, they could keep running and use memory twice.
+
 ## [1.9.1] - 2026-11-08
 
 ### Changed
