@@ -28,6 +28,7 @@ from PIL import Image, ImageOps
 
 from . import __version__, logging_setup, pdfops, priority
 from .config import Settings
+from .fileio import write_json
 from .ocr_plugin import HYBRID_DIR, HYBRID_RATE
 from .tokens import TokenStore
 
@@ -108,9 +109,7 @@ class Jobs:
 
     def write(self, job: dict) -> None:
         path = self.folder(job["id"]) / "job.json"
-        tmp = path.with_name("job.json.tmp")
-        tmp.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        write_json(path, job, ensure_ascii=False)
 
     def update(self, job_id: str, **changes) -> dict:
         with self._lock:
@@ -266,9 +265,7 @@ def process(job: dict, folder: Path, settings: Settings) -> int:
     if failed:
         raise RuntimeError(f"Mistral OCR failed on page {failed[0][0]}: {failed[0][1]}")
     data = _result_json(job, folder, result)
-    tmp = folder / "result.json.tmp"
-    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(folder / "result.json")
+    write_json(folder / "result.json", data, ensure_ascii=False)
     return len(data["pages"])
 
 

@@ -13,6 +13,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .fileio import write_text
+
 _PART = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$")
 
 
@@ -81,9 +83,7 @@ class Plan:
     keep_name: bool = False
 
     def save(self, path: Path) -> None:
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(asdict(self), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp.replace(path)
+        write_text(path, json.dumps(asdict(self), ensure_ascii=False, indent=2) + "\n")
 
     @classmethod
     def load(cls, path: Path) -> "Plan":

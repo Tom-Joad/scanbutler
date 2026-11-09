@@ -15,15 +15,17 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 import pikepdf
 
 from . import priority
+from .fileio import write_json
 
 log = logging.getLogger(__name__)
 
 _IMAGE_REF = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_CACHE_NAME = re.compile(r"^chunk_\d{5}_(\d+)\.json$")
 _NOISE = re.compile(r"[\s#*_|`>\-=~.:]+")
 
 
@@ -76,6 +78,16 @@ def _chunk_bytes(pdf: pikepdf.Pdf, start: int, stop: int) -> bytes:
     return buffer.getvalue()
 
 
+def _chunk_bytes_of(pdf_path: Path, start: int, stop: int) -> bytes:
+    """The bytes of one chunk, read when it is needed (and freed by the caller).
+
+    Each call opens the file itself: a pikepdf object must not be shared by
+    the OCR worker threads.
+    """
+    with pikepdf.open(pdf_path) as pdf:
+        return _chunk_bytes(pdf, start, stop)
+
+
 def _page_from_api(offset: int, raw: dict) -> Page:
     return Page(
         index=offset + int(raw.get("index", 0)),
@@ -106,51 +118,80 @@ def _custom_id(start: int) -> str:
 def _store(cache: Path, pages: list[dict], start: int, expected: int) -> None:
     if len(pages) != expected:
         raise RuntimeError(f"OCR returned {len(pages)} pages for a {expected}-page chunk at page {start + 1}")
-    tmp = cache.with_suffix(".tmp")
-    tmp.write_text(json.dumps(pages, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(cache)
+    write_json(cache, pages, ensure_ascii=False)
     log.info("ocr chunk done", extra={"first_page": start + 1, "pages": expected})
 
 
-def _group_by_size(items: list[tuple[int, Path, bytes]], limit: int) -> list[list[tuple[int, Path, bytes]]]:
-    groups: list[list[tuple[int, Path, bytes]]] = [[]]
-    size = 0
-    for item in items:
-        encoded = len(item[2]) * 4 // 3
-        if groups[-1] and size + encoded > limit:
-            groups.append([])
-            size = 0
-        groups[-1].append(item)
-        size += encoded
-    return groups
+def _load_jobs(state_path: Path) -> list[dict]:
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError):
+        # Written atomically since 1.9.2, so only an older crash leaves this.
+        # Failing on it for good would be worse than asking again.
+        log.warning("batch state unreadable, ignored", extra={"file": state_path.name})
+        return []
 
 
 def _run_batches(
-    pending: list[tuple[int, Path, bytes]], cache_dir: Path, backend, options: BatchOptions, expected: dict[int, int]
+    pending: list[tuple[int, Path]],
+    cache_dir: Path,
+    backend,
+    options: BatchOptions,
+    expected: dict[int, int],
+    make_bytes: Callable[[int], bytes],
+    chunk_pages: int,
 ) -> None:
     """Fetch pending chunks through batch jobs; leaves failed chunks uncached.
 
     Job ids are written to disk right after submission, so a restart resumes
     waiting for jobs it already paid for instead of submitting them again.
+    A job is marked `collected` before its files are deleted at Mistral, so a
+    later attempt never asks for results that are gone: its chunks that
+    failed go to direct OCR.
     """
     state_path = cache_dir / BATCH_STATE
-    jobs: list[dict] = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else []
-    by_start = {start: (start, cache, data) for start, cache, data in pending}
+    jobs = _load_jobs(state_path)
+    by_start = dict(pending)
+
+    # A job made with another OCR_CHUNK_PAGES holds chunks of a different
+    # layout; its answers would never fit the pages asked for now.
+    stale = [job for job in jobs if job.get("chunk_pages", chunk_pages) != chunk_pages]
+    if stale:
+        log.warning("batch jobs of another chunk size dropped", extra={"jobs": len(stale), "chunk_pages": chunk_pages})
+        backend.delete_files([job.get("input_file") for job in stale])
+        jobs = [job for job in jobs if job not in stale]
+        write_json(state_path, jobs)
     submitted = {start for job in jobs for start in job["chunks"]}
 
-    unsent = [item for item in pending if item[0] not in submitted]
+    def submit(group: list[tuple[int, bytes]]) -> None:
+        lines = [(_custom_id(start), backend.ocr_body(data)) for start, data in group]
+        ids = backend.submit_batch("/v1/ocr", backend.ocr_model, lines)
+        jobs.append({**ids, "chunks": [start for start, _ in group], "chunk_pages": chunk_pages})
+        write_json(state_path, jobs)
+
+    unsent = [start for start in by_start if start not in submitted]
     if unsent:
-        for group in _group_by_size(unsent, options.max_upload_bytes):
-            lines = [(_custom_id(start), backend.ocr_body(data)) for start, _, data in group]
-            ids = backend.submit_batch("/v1/ocr", backend.ocr_model, lines)
-            jobs.append({**ids, "chunks": [start for start, _, _ in group]})
-            state_path.write_text(json.dumps(jobs), encoding="utf-8")
+        # Each chunk's bytes are built when its group is uploaded and freed
+        # with it; a big stack is never held in memory whole.
+        group: list[tuple[int, bytes]] = []
+        size = 0
+        for start in unsent:
+            data = make_bytes(start)
+            encoded = len(data) * 4 // 3  # base64 inflates PDFs by a third
+            if group and size + encoded > options.max_upload_bytes:
+                submit(group)
+                group, size = [], 0
+            group.append((start, data))
+            size += encoded
+        submit(group)
     else:
         log.info("resuming batch jobs", extra={"jobs": len(jobs)})
 
     for job in jobs:
         wanted = [start for start in job["chunks"] if start in by_start]
-        if not wanted:
+        if not wanted or job.get("collected"):
             continue
         finished = backend.wait_batch(job["job"], options.poll_seconds, options.max_wait_seconds)
         results = backend.batch_results(finished)
@@ -159,11 +200,33 @@ def _run_batches(
             if body is None:
                 log.warning("batch chunk failed", extra={"first_page": start + 1, "job": job["job"]})
                 continue
-            _store(by_start[start][1], backend.ocr_pages(body), start, expected[start])
+            try:
+                _store(by_start[start], backend.ocr_pages(body), start, expected[start])
+            except RuntimeError as exc:
+                # Not usable (wrong page count): direct OCR asks again.
+                log.warning("batch chunk unusable", extra={"first_page": start + 1, "error": str(exc)[:200]})
+        job["collected"] = True
+        write_json(state_path, jobs)
         # The uploads hold the scans themselves; don't leave them at Mistral.
         backend.delete_files([job.get("input_file"), finished.get("output_file"), finished.get("error_file")])
 
     state_path.unlink(missing_ok=True)
+
+
+def _cached_chunk_pages(cache_dir: Path, total: int, default: int) -> int:
+    """The chunk size to read the cache with.
+
+    OCR_CHUNK_PAGES may have changed since the stack was processed. If the
+    cache holds a complete set of chunks of some other size, use that size:
+    asking Mistral again would pay for text we already have.
+    """
+    sizes = {int(m.group(1)) for path in cache_dir.glob("chunk_*_*.json") if (m := _CACHE_NAME.match(path.name))}
+    for size in sorted(sizes, key=lambda n: n != default):  # the current size first
+        if all((cache_dir / f"chunk_{start:05d}_{size}.json").exists() for start in range(0, total, size)):
+            if size != default:
+                log.info("using cached ocr chunks of another size", extra={"chunk_pages": size})
+            return size
+    return default
 
 
 def run_ocr(
@@ -178,24 +241,28 @@ def run_ocr(
 
     with pikepdf.open(pdf_path) as pdf:
         total = len(pdf.pages)
-        starts = list(range(0, total, chunk_pages))
-        pending: list[tuple[int, Path, bytes]] = []
-        for start in starts:
-            cache = cache_dir / f"chunk_{start:05d}_{chunk_pages}.json"
-            if not cache.exists():
-                pending.append((start, cache, _chunk_bytes(pdf, start, min(start + chunk_pages, total))))
+    chunk_pages = _cached_chunk_pages(cache_dir, total, chunk_pages)
+    starts = list(range(0, total, chunk_pages))
+    pending = [
+        (start, cache)
+        for start in starts
+        if not (cache := cache_dir / f"chunk_{start:05d}_{chunk_pages}.json").exists()
+    ]
     expected = {start: min(chunk_pages, total - start) for start in starts}
+
+    def make_bytes(start: int) -> bytes:
+        return _chunk_bytes_of(pdf_path, start, start + expected[start])
 
     if pending and batch is not None:
         log.info("ocr started (batch)", extra={"file": pdf_path.name, "pages": total, "chunks_to_fetch": len(pending)})
-        _run_batches(pending, cache_dir, backend, batch, expected)
+        _run_batches(pending, cache_dir, backend, batch, expected, make_bytes, chunk_pages)
         pending = [item for item in pending if not item[1].exists()]
         if pending:
             log.warning("falling back to direct ocr", extra={"chunks": len(pending)})
 
-    def work(item: tuple[int, Path, bytes]) -> None:
-        start, cache, data = item
-        _store(cache, backend.ocr_pdf(data), start, expected[start])
+    def work(item: tuple[int, Path]) -> None:
+        start, cache = item
+        _store(cache, backend.ocr_pdf(make_bytes(start)), start, expected[start])
 
     if pending:
         log.info("ocr started", extra={"file": pdf_path.name, "pages": total, "chunks_to_fetch": len(pending)})
