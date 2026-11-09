@@ -131,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     again = sub.add_parser("rebuild", help="re-cut a stack from its edited plan.json")
     again.add_argument("work_dir", help="the stack's work directory, absolute or relative to WORK_DIR")
+    sub.add_parser("check-config", help="check the settings and exit; used by the container's init step")
     token = sub.add_parser("token", help="manage API tokens")
     token_sub = token.add_subparsers(dest="action", required=True)
     token_sub.add_parser("add", help="create a token for a program; it is shown once").add_argument("name")
@@ -141,6 +142,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if command == "token":
         return _token(args)
+    if command == "check-config":
+        try:
+            Settings.from_env()
+        except ConfigError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        return 0
 
     try:
         settings = Settings.from_env(require_api_key=command != "rebuild")
