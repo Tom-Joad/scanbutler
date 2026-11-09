@@ -8,6 +8,24 @@ layout, a changed webhook payload) only comes with a new major version.
 ## [Unreleased]
 
 ### Fixed
+- An unknown `LOG_LEVEL` stops with `config_invalid` (it listed a traceback
+  and restarted in a loop). `DEBUG`, `INFO`, `WARNING` and `ERROR` are
+  accepted in any case.
+- Numeric settings are range-checked: `nan`, `inf`, zero or negative
+  timeouts and wait times, a negative `MISTRAL_MAX_RPS`, a
+  `REVIEW_CONFIDENCE` outside 0 to 1, `BLANK_MAX_INK_PERCENT` outside 0 to
+  100 and an `API_PORT` above 65535 stop with `config_invalid` naming the
+  setting. Before, they were taken silently and showed up later as odd
+  behaviour.
+- An unexpected error is logged as one JSON line (`crashed`, with the
+  error) and exits with code 1, not as a multi-line traceback. The traceback
+  is in the `traceback` field at `LOG_LEVEL=DEBUG`.
+- `scanbutler process`, `rebuild` and `token` log to stderr, so their result
+  on stdout (`scanbutler rebuild DIR > files.txt`) stays clean. `run` still
+  logs to stdout.
+- `WORK_RETENTION_DAYS` accepts again what 1.9.0 accepted: a fraction is
+  rounded and a negative value counts as 0, with a `setting adjusted`
+  warning. 1.9.1 stopped with `config_invalid` for these values.
 - The service stops (and s6 restarts it) when any of its threads has ended:
   one input, the API, the queue webhook or the object sharing. Before, it
   waited until all inputs had died, and the health check kept saying healthy
@@ -250,7 +268,6 @@ register are recognised before any OCR or upload, so this costs nothing.
 
 ## [1.3.1] - 2026-10-04
 
-### Fixed
 - OCR no longer fails with `Permission denied: '/root/.fonts'` on pages
   that need a system font. The watcher, and `docker exec … scanbutler`,
   ran as `abc` with root's home folder, which `abc` may not read; their
