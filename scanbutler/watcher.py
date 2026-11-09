@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 
 HEARTBEAT = Path("/tmp/scanbutler.heartbeat")
 PAPERLESS_RETRY_SECONDS = 300
+HEARTBEAT_SECONDS = 30
 FOLDER_RETRY_SECONDS = 60
 # A PDF without its end, or an empty one, is taken as still being written;
 # only after this long without change is it processed anyway (and then fails
@@ -252,12 +253,22 @@ class InboxWatcher:
             if self.gate.paused or len(ready) == 1:
                 return
             ready = ready[1:]
+        submitted = []
         with ThreadPoolExecutor(max_workers=min(len(ready), self.settings.ocrmypdf_jobs)) as pool:
             for path in ready:
                 # While paused, may_process lets exactly one probe through.
                 if self.stop.is_set() or time.monotonic() < self._retry_after or not self._may_start():
                     break
-                pool.submit(self.process, path)
+                submitted.append((path, pool.submit(self.process, path)))
+        # What escapes process() (the move to failed/ raising, say) sits in the
+        # future; without this it would be dropped with no log line.
+        for path, future in submitted:
+            if (error := future.exception()) is not None:
+                log.error(
+                    "inbox poll failed",
+                    exc_info=error,
+                    extra={"profile": self.profile.name, "source": path.relative_to(self.profile.inbox).as_posix()},
+                )
 
     def _create(self, folders: list[Path]) -> bool:
         try:
@@ -307,6 +318,7 @@ def run_all(settings: Settings, backend) -> None:
 
     gate = PauseGate(settings.pause_retry_minutes * 60)
     reporter = None
+    helpers: list[threading.Thread] = []  # side threads the loop below watches too
     if settings.queue_webhook_url:
         reporter = QueueReporter(
             settings.queue_webhook_url,
@@ -315,7 +327,9 @@ def run_all(settings: Settings, backend) -> None:
             settings.queue_webhook_heartbeat_seconds,
             gate=gate,
         )
-        threading.Thread(target=reporter.run, args=(stop,), name="queue-webhook", daemon=True).start()
+        helper = threading.Thread(target=reporter.run, args=(stop,), name="queue-webhook", daemon=True)
+        helper.start()
+        helpers.append(helper)
         log.info("queue webhook enabled", extra={"heartbeat_s": settings.queue_webhook_heartbeat_seconds})
 
     if settings.paperless_share_kinds:
@@ -325,7 +339,9 @@ def run_all(settings: Settings, backend) -> None:
             settings.paperless_share_tags_readonly,
             settings.paperless_share_tags_minutes * 60,
         )
-        threading.Thread(target=sharer.run, args=(stop,), name="share-objects", daemon=True).start()
+        helper = threading.Thread(target=sharer.run, args=(stop,), name="share-objects", daemon=True)
+        helper.start()
+        helpers.append(helper)
     workers = [
         threading.Thread(
             # Each Paperless input uploads with its own token, as its own user.
@@ -349,13 +365,15 @@ def run_all(settings: Settings, backend) -> None:
     # can take an hour, which must not count as hung. It also clears out old
     # work folders, at start and then every few hours.
     next_cleanup = 0.0
-    def running() -> bool:
-        # Stop (s6 restarts the service) once the inputs have all died or an
-        # API thread has: until then the heartbeat says healthy.
-        inputs = not workers or any(worker.is_alive() for worker in workers)
-        return inputs and all(thread.is_alive() for thread in services)
+    watched = [*workers, *helpers, *services]
 
-    while not stop.is_set() and running():
+    def ended() -> list[str]:
+        # Any thread that ends stops the service (s6 restarts it): until then
+        # the heartbeat would say healthy while an inbox, the API, the webhook
+        # or the sharing is dead.
+        return [thread.name for thread in watched if not thread.is_alive()]
+
+    while not stop.is_set() and not ended():
         HEARTBEAT.touch()
         if time.monotonic() >= next_cleanup:
             next_cleanup = time.monotonic() + retention.CHECK_SECONDS
@@ -363,8 +381,8 @@ def run_all(settings: Settings, backend) -> None:
                 retention.clean(settings)
             except Exception:  # noqa: BLE001 - cleanup must never stop the watcher
                 log.exception("work folder cleanup failed")
-        stop.wait(30)
+        stop.wait(HEARTBEAT_SECONDS)
     if not stop.is_set():
-        log.error("stopped: an input or the API is no longer running")
+        log.error("stopped: an input or the API is no longer running", extra={"threads": ended()})
     else:
         log.info("stopped")
