@@ -85,7 +85,7 @@ def test_dark_pages_count_as_full_of_ink_not_as_empty(tmp_path):
     assert coverage[2] == 0  # a really blank page stays blank
 
 
-def _settings_pages(settings, tmp_path):
+def _pages_with_dark_xrays(tmp_path):
     text = Image.new("L", (850, 1100), 250)
     for row in range(20):
         ImageDraw.Draw(text).rectangle((80, 80 + row * 45, 760, 92 + row * 45), fill=0)
@@ -101,7 +101,7 @@ def _settings_pages(settings, tmp_path):
 
 def test_dark_pages_survive_build_plan(settings, tmp_path):
     settings = replace(settings, blank_max_ink=0.002)
-    pages = _settings_pages(settings, tmp_path)
+    pages = _pages_with_dark_xrays(tmp_path)
     assert [p.is_blank(settings.blank_max_chars, settings.blank_max_ink) for p in pages] == [False, False, False]
 
     plan = build_plan(pages, settings, FakeBackend([]), "s.pdf", "abc", PurePosixPath(""))
@@ -112,7 +112,7 @@ def test_dark_pages_survive_build_plan(settings, tmp_path):
 
 def test_dark_pages_survive_keep_name_plan(settings, tmp_path):
     settings = replace(settings, blank_max_ink=0.002)
-    pages = _settings_pages(settings, tmp_path)
+    pages = _pages_with_dark_xrays(tmp_path)
 
     plan = keep_name_plan(pages, settings, "s.pdf", "abc", PurePosixPath(""), "s")
 

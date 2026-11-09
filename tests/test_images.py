@@ -6,9 +6,12 @@ import base64
 import pikepdf
 import pypdfium2 as pdfium
 import pytest
+from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
 
-from scanbutler import images, ocr_plugin
+from scanbutler import api, images, ocr_plugin
+from scanbutler.config import Settings
+from scanbutler.tokens import TokenStore
 
 
 def _text_page(mode: str, white: int, black: int) -> Image.Image:
@@ -98,12 +101,6 @@ def test_a_decompression_bomb_is_refused(tmp_path, monkeypatch):
 
 
 def test_api_refuses_an_image_with_too_many_frames(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from scanbutler import api
-    from scanbutler.config import Settings
-    from scanbutler.tokens import TokenStore
-
     monkeypatch.setenv("WORK_DIR", str(tmp_path / "work"))
     monkeypatch.setenv("MISTRAL_API_KEY", "test")
     monkeypatch.setenv("API_ENABLED", "true")
