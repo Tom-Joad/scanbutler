@@ -5,6 +5,14 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Changed
+- The whole Python dependency tree is pinned (about 40 packages, with the
+  package that needs each one), not only the seven direct dependencies. Two
+  builds of one version now contain the same libraries, and Dependabot
+  proposes updates for all of them.
+
 ## [1.9.1] - 2026-11-08
 
 ### Changed
