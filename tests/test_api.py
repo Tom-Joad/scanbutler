@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from scanbutler import api
+from scanbutler import api, images
 from scanbutler.config import Settings
 from scanbutler.tokens import TokenError, TokenStore
 
@@ -203,7 +203,7 @@ def test_image_to_pdf_upright(tmp_path):
     exif[0x0112] = 6  # rotated: the camera was held upright
     image.save(src, exif=exif)
     dst = tmp_path / "photo.pdf"
-    api.image_to_pdf(src, dst)
+    images.to_pdf(src, dst)
     import pikepdf
 
     with pikepdf.open(dst) as pdf:
@@ -226,7 +226,7 @@ def test_image_resolution(tmp_path, size, dpi, expected):
     src = tmp_path / "in.png"
     Image.new("L", size, 255).save(src, dpi=dpi) if dpi else Image.new("L", size, 255).save(src)
     dst = tmp_path / "out.pdf"
-    api.image_to_pdf(src, dst)
+    images.to_pdf(src, dst)
     with pikepdf.open(dst) as pdf:
         box = pdf.pages[0].mediabox
         long_side_pt = max(float(box[2]), float(box[3]))

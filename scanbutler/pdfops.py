@@ -21,6 +21,10 @@ log = logging.getLogger(__name__)
 
 # Grey levels a pixel must be below the paper colour to count as ink.
 INK_CONTRAST = 40
+# A page whose median grey is darker than this has no paper to measure
+# against (an X-ray, a dark photo, a black cover sheet): it is measured
+# against white paper instead, and counts as full of ink, not as empty.
+DARK_MEDIAN = 128
 
 
 def page_count(path: Path) -> int:
@@ -47,8 +51,9 @@ def ink_coverage(path: Path, dpi: int = 50) -> list[float]:
 
     The threshold follows the page's own background, so tinted paper and
     pale forms are measured fairly. A 5% margin is ignored (scanner edges),
-    and a median filter removes dust specks. This is independent of OCR,
-    which matters because OCR models can hallucinate text on blank pages.
+    and a median filter removes dust specks. A mostly dark page has no paper
+    colour to follow; it is measured against white. This is independent of
+    OCR, which matters because OCR models can hallucinate text on blank pages.
     """
     doc = pdfium.PdfDocument(str(path))
     try:
@@ -65,6 +70,8 @@ def ink_coverage(path: Path, dpi: int = 50) -> list[float]:
                 if running * 2 >= total:
                     background = value
                     break
+            if background < DARK_MEDIAN:
+                background = 255
             result.append(sum(histogram[: max(0, background - INK_CONTRAST)]) / total)
         return result
     finally:

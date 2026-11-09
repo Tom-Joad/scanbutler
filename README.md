@@ -787,7 +787,10 @@ apply without a restart. A program sees only the jobs it created.
 
 The body is the file itself (no form encoding): a PDF, JPEG, PNG, TIFF or
 WebP. Both query parameters are optional; `filename` names the result.
-Photos are turned upright by their orientation tag. With `callback_url`, Scanbutler posts
+Photos are turned upright by their orientation tag. An image may have up
+to 200 frames (pages) and 4000 megapixels in all; a bigger one is refused
+with `413` before anything is decoded, and so is a file that isn't a
+readable image (`422`). With `callback_url`, Scanbutler posts
 `{"id", "status": "ok"|"failed", "message", "links"}` there when the job is
 finished; the program then fetches the results with its token. If Mistral
 can't read a page (an outage, the spending limit), the job fails with
