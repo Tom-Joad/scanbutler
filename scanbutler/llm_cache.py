@@ -11,6 +11,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from .fileio import write_json
+
 
 class CachedChat:
     def __init__(self, backend, cache_dir: Path) -> None:
@@ -27,7 +29,5 @@ class CachedChat:
             return json.loads(path.read_text(encoding="utf-8"))
         answer = self._backend.chat_json(system, user, schema, name)
         self._dir.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(answer, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        write_json(path, answer, ensure_ascii=False)
         return answer

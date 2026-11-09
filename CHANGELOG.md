@@ -8,6 +8,23 @@ layout, a changed webhook payload) only comes with a new major version.
 ## [Unreleased]
 
 ### Fixed
+- State files are written with a temporary file and a rename everywhere
+  (the ink measurement, the batch job state with the ids of paid Mistral
+  jobs, the Paperless upload state, the API's per-page records). A crash or
+  a full disk while one was written used to leave a cut-off file that failed
+  the stack on every retry, until the work folder was deleted by hand; for the
+  batch state that meant paying for the batch again. An unreadable ink
+  measurement or batch state is now treated as missing.
+- Batch OCR that was interrupted no longer fails the file on every retry:
+  jobs made with another `OCR_CHUNK_PAGES` are dropped, an answer with the
+  wrong page count falls back to direct OCR, and a job whose results were
+  already collected is not asked for again after its files were deleted.
+- `scanbutler rebuild` (and a re-run) reads cached OCR text even when
+  `OCR_CHUNK_PAGES` was changed since, instead of paying Mistral for the same
+  pages again.
+- Mistral OCR builds a chunk's PDF only when it is sent and frees it
+  afterwards, so a large colour stack no longer sits in memory whole
+  (batch uploads are built group by group).
 - Mostly dark pages (X-rays, dark photos, a black cover sheet) were measured
   as having no ink and were dropped as blank, with the default
   `DROP_BLANK_PAGES=true`. They now count as full of ink, so a page with an

@@ -31,6 +31,7 @@ from ocrmypdf.hocrtransform.hocr_parser import HocrParser
 from PIL import Image
 
 from . import hybrid, images
+from .fileio import write_json
 
 log = logging.getLogger(__name__)
 
@@ -89,9 +90,7 @@ def mistral_page(image_file: Path, folder: Path, ocr=None) -> tuple[dict, str]:
     result = (ocr or _ocr)(body)
     pages = result.get("pages") or [{}]
     page = pages[0]
-    tmp = cached.with_suffix(".tmp")
-    tmp.write_text(json.dumps(page, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(cached)
+    write_json(cached, page, ensure_ascii=False)
     return page, digest
 
 
@@ -119,7 +118,7 @@ class HybridOcrEngine(TesseractOcrEngine):
             # the page again (a differently prepared image, so no cache hit):
             # paid again, to fail again. The page keeps Tesseract's reading;
             # the record tells the caller that Mistral failed.
-            record_path.write_text(json.dumps({"page": page_number + 1, "error": str(exc)[:500]}), encoding="utf-8")
+            write_json(record_path, {"page": page_number + 1, "error": str(exc)[:500]})
             log.warning("page %d: Mistral OCR failed: %s", page_number + 1, exc)
             return page, hybrid.text_of(page)
         with Image.open(input_file) as image:
@@ -135,7 +134,7 @@ class HybridOcrEngine(TesseractOcrEngine):
             "lines_added": stats.lines_added,
             "noise_dropped": stats.noise_dropped,
         }
-        record_path.write_text(json.dumps(record), encoding="utf-8")
+        write_json(record_path, record)
         log.info("page %d: %d lines from Mistral, %d kept", page_number + 1, stats.lines_replaced, stats.lines_kept)
         return merged, hybrid.text_of(merged)
 
