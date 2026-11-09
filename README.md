@@ -723,8 +723,8 @@ kinds that has an owner. Every user with the global permissions for that
 kind may then see and change it.
 
 - The token needs permission to change other users' objects, in practice a
-  superuser's. With a weaker one, `tags could not be shared` (or
-  `correspondents …`, `document types …`) is logged once with HTTP 403, and
+  superuser's. With a weaker one, `objects could not be shared` (with `kind`: `tags`,
+  `correspondents` or `document_types`) is logged once with HTTP 403, and
   the other kinds and the uploads carry on. The same happens while
   Paperless is unreachable.
 - Shared correspondents show every user who writes to whom: a bank, an
@@ -737,12 +737,12 @@ kind may then see and change it.
 - Paperless doesn't allow two ownerless objects of a kind with the same
   name, e.g. a correspondent that you and an AI tagger both created. Such
   an object stays as it is, and the log names it once as
-  `correspondents not shared` with its `id` and the ownerless one it clashes
+  `objects not shared` with its `kind`, its `id` and the ownerless one it clashes
   with (`same_name_as`); all others are shared. Merge the two in Paperless,
   and it is shared in the next round.
 - A check with nothing to do costs one list request per kind. The log says
-  how many were shared, with their ids (`tags shared`,
-  `correspondents shared`, `document types shared`), never their names.
+  how many were shared, with their ids (`objects shared` with `kind`), never
+  their names.
 - Storage paths and custom fields keep their owners.
 
 ## HTTP API

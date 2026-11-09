@@ -152,12 +152,12 @@ WATCHER_HOME=$(docker exec --user abc "$NAME" sh -c "tr '\\0' '\\n' < /proc/$PID
 
 in_log '"event":"watching inbox","profile":"paperless-2"' || fail "the second Paperless input did not start"
 for _ in $(seq 1 30); do
-    in_log '"event":"tags could not be shared' && break
+    in_log '"event":"objects could not be shared","kind":"tags"' && break
     sleep 1
 done
-in_log '"event":"tags could not be shared' || fail "tag sharing did not run"
-in_log '"event":"correspondents could not be shared' || fail "correspondent sharing did not run"
-in_log '"event":"document types could not be shared' || fail "document type sharing did not run"
+in_log '"event":"objects could not be shared","kind":"tags"' || fail "tag sharing did not run"
+in_log '"event":"objects could not be shared","kind":"correspondents"' || fail "correspondent sharing did not run"
+in_log '"event":"objects could not be shared","kind":"document_types"' || fail "document type sharing did not run"
 [[ $(docker inspect -f '{{.State.Status}}' "$NAME") == running ]] || fail "stopped with Paperless unreachable"
 
 for dir in stacks/inbox scanner/inbox paperless/inbox paperless-2 paperless-2/inbox; do

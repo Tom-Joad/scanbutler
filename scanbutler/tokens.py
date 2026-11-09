@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -17,6 +18,8 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 PREFIX = "sb_"
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
@@ -41,12 +44,17 @@ class Token:
     created_at: str
 
 
+class TokensUnreadable(TokenError):
+    """tokens.json can't be parsed and there is no earlier good list to go on with."""
+
+
 class TokenStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
         self._seen: tuple[int, int] | None = None
         self._tokens: list[Token] = []
+        self._unreadable = False
 
     def _load(self) -> list[Token]:
         try:
@@ -56,9 +64,18 @@ class TokenStore:
             return []
         seen = (stat.st_mtime_ns, stat.st_size)
         if seen != self._seen:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-            self._tokens = [Token(t["name"], t["sha256"], t.get("created_at", "")) for t in data.get("tokens", [])]
-            self._seen = seen
+            self._seen = seen  # look at this version of the file once, not on every request
+            try:
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                self._tokens = [Token(t["name"], t["sha256"], t.get("created_at", "")) for t in data.get("tokens", [])]
+                self._unreadable = False
+            except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+                # Hand-edited, or cut off by something outside this program.
+                # Keep the last good list if there is one.
+                self._unreadable = True
+                log.error("api tokens unreadable", extra={"file": self.path.name, "error": f"{type(exc).__name__}: {exc}"[:200]})
+        if self._unreadable and not self._tokens:
+            raise TokensUnreadable(f"{self.path.name} can't be read")
         return self._tokens
 
     def tokens(self) -> list[Token]:

@@ -7,7 +7,30 @@ layout, a changed webhook payload) only comes with a new major version.
 
 ## [Unreleased]
 
+### Changed
+- Log lines of the OCR plugin and of the Paperless object sharing keep their
+  values out of the event name: `page mistral ocr failed` and `page merged`
+  carry `page`, `error`, `lines_from_mistral` and `lines_kept` as fields, and
+  `objects shared`, `objects not shared` and `objects could not be shared`
+  carry `kind` (`tags`, `correspondents`, `document_types`). Anyone matching
+  on the old lines (`tags shared`, `page 3: ...`) has to change the filter.
+
 ### Fixed
+- API: deleting a job the cleanup removed in the meantime answers `404`, not
+  `500`. A job folder whose `job.json` can't be read is logged once
+  (`api job unreadable`), answers `404` and is removed by the cleanup like a
+  folder without one. A `tokens.json` that can't be parsed is logged once
+  (`api tokens unreadable`) and every request answers `503` (the last good
+  list keeps working if the API already had one) instead of a `500` with a
+  traceback per request.
+- API: the OCR plugin uses the Mistral settings the main process validated
+  (key, base URL, OCR model, timeout). An empty `MISTRAL_TIMEOUT` failed
+  every job on its first page, and a key with a trailing space or newline
+  went into the request header as it was.
+- API: a malformed Mistral answer for a page (a non-numeric coordinate or
+  size) no longer fails the whole ocrmypdf mode, which paid for every page
+  again in the next one. The page keeps Tesseract's reading and the job
+  fails afterwards with the error, like for a failed request.
 - State files are written with a temporary file and a rename everywhere
   (the ink measurement, the batch job state with the ids of paid Mistral
   jobs, the Paperless upload state, the API's per-page records). A crash or
