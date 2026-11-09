@@ -5,6 +5,26 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- Mostly dark pages (X-rays, dark photos, a black cover sheet) were measured
+  as having no ink and were dropped as blank, with the default
+  `DROP_BLANK_PAGES=true`. They now count as full of ink, so a page with an
+  image stays in the document. Stacks processed before are not measured
+  again.
+- 16-bit greyscale images (TIFF or PNG) sent to the API became white pages
+  and ended `done` with empty text. They are scaled to 8 bits now, in the
+  API and in the OCR plugin.
+- With `DROP_BLANK_PAGES=false`, a blank page at the start of a document hid
+  the review checks ("starts with page 2 of 3").
+
+### Changed
+- API: an image upload is converted one frame at a time, and an image with
+  more than 200 frames or 4000 megapixels in all is refused with `413`; a
+  file that is not a readable image is refused with `422`. Before, such an
+  upload could use all of the container's memory.
+
 ## [1.9.1] - 2026-11-08
 
 ### Changed

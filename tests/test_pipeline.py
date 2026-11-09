@@ -142,3 +142,23 @@ def test_profiles_have_separate_folders(settings):
     stacks, scanner = settings.profile("stacks"), settings.profile("scanner")
     assert stacks.split and not scanner.split
     assert {stacks.inbox, stacks.output}.isdisjoint({scanner.inbox, scanner.output})
+
+
+def test_a_leading_blank_page_does_not_hide_the_review_checks(settings, tmp_path):
+    from dataclasses import replace
+
+    from scanbutler.ocr import Page
+    from scanbutler.pipeline import build_plan
+
+    settings = replace(settings, drop_blank_pages=False)
+    pages = [
+        Page(0, "", "", "", False, ink=0.0),  # a blank page before the first content page
+        Page(1, "LETTER Befund\nThorax", "", "Seite 2 von 3", False, ink=0.05),
+        Page(2, "Beurteilung unauffaellig", "", "Seite 3 von 3", False, ink=0.05),
+    ]
+
+    plan = build_plan(pages, settings, FakeBackend([]), "s.pdf", "abc", PurePosixPath(""))
+
+    [doc] = plan.documents
+    assert doc.pages == "1-3"  # the blank page is kept, sorted to the front
+    assert doc.needs_review and "starts with page 2 of 3" in doc.review_reason
