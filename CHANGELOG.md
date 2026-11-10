@@ -31,6 +31,7 @@ layout, a changed webhook payload) only comes with a new major version.
   size) no longer fails the whole ocrmypdf mode, which paid for every page
   again in the next one. The page keeps Tesseract's reading and the job
   fails afterwards with the error, like for a failed request.
+### Fixed
 - State files are written with a temporary file and a rename everywhere
   (the ink measurement, the batch job state with the ids of paid Mistral
   jobs, the Paperless upload state, the API's per-page records). A crash or
@@ -48,6 +49,61 @@ layout, a changed webhook payload) only comes with a new major version.
 - Mistral OCR builds a chunk's PDF only when it is sent and frees it
   afterwards, so a large colour stack no longer sits in memory whole
   (batch uploads are built group by group).
+- Mostly dark pages (X-rays, dark photos, a black cover sheet) were measured
+  as having no ink and were dropped as blank, with the default
+  `DROP_BLANK_PAGES=true`. They now count as full of ink, so a page with an
+  image stays in the document. Stacks processed before are not measured
+  again.
+- 16-bit greyscale images (TIFF or PNG) sent to the API became white pages
+  and ended `done` with empty text. They are scaled to 8 bits now, in the
+  API and in the OCR plugin.
+- With `DROP_BLANK_PAGES=false`, a blank page at the start of a document hid
+  the review checks ("starts with page 2 of 3").
+
+### Changed
+- API: an image upload is converted one frame at a time, and an image with
+  more than 200 frames or 4000 megapixels in all is refused with `413`; a
+  file that is not a readable image is refused with `422`. Before, such an
+  upload could use all of the container's memory.
+- An unknown `LOG_LEVEL` stops with `config_invalid` (it listed a traceback
+  and restarted in a loop). `DEBUG`, `INFO`, `WARNING` and `ERROR` are
+  accepted in any case.
+- Numeric settings are range-checked: `nan`, `inf`, zero or negative
+  timeouts and wait times, a negative `MISTRAL_MAX_RPS`, a
+  `REVIEW_CONFIDENCE` outside 0 to 1, `BLANK_MAX_INK_PERCENT` outside 0 to
+  100 and an `API_PORT` above 65535 stop with `config_invalid` naming the
+  setting. Before, they were taken silently and showed up later as odd
+  behaviour.
+- An unexpected error is logged as one JSON line (`crashed`, with the
+  error) and exits with code 1, not as a multi-line traceback. The traceback
+  is in the `traceback` field at `LOG_LEVEL=DEBUG`.
+- `scanbutler process`, `rebuild` and `token` log to stderr, so their result
+  on stdout (`scanbutler rebuild DIR > files.txt`) stays clean. `run` still
+  logs to stdout.
+- `WORK_RETENTION_DAYS` accepts again what 1.9.0 accepted: a fraction is
+  rounded and a negative value counts as 0, with a `setting adjusted`
+  warning. 1.9.1 stopped with `config_invalid` for these values.
+- The service stops (and s6 restarts it) when any of its threads has ended:
+  one input, the API, the queue webhook or the object sharing. Before, it
+  waited until all inputs had died, and the health check kept saying healthy
+  while one inbox was never processed again. The log line names the threads
+  (`threads`).
+- When several scanner or Paperless files are processed at once, an error
+  that escaped (for example a read-only share when moving a file to
+  `failed/`) is logged as `inbox poll failed` with the file; before, it was
+  dropped without a line.
+- When ocrmypdf runs into `OCRMYPDF_FILE_TIMEOUT_MINUTES`, its worker
+  processes and the programs they started are stopped as well, before the
+  next mode starts. Before, they could keep running and use memory twice.
+- A wrong or missing setting now stops the container with one message
+  (`ERROR: MISTRAL_API_KEY is not set; …`) instead of leaving it `running`
+  and logging `config_invalid` every second. The check runs in the init
+  step.
+- After a changed `PUID`/`PGID`, or a `/config` restored from another host,
+  everything below `/config` is handed over to the service user at start.
+  Before, the service could not read its own files; with the API on it
+  crashed at start in a loop. When nothing changed, the start only looks
+  for files with another owner.
 
 ## [1.9.1] - 2026-11-08
 
@@ -269,7 +325,6 @@ register are recognised before any OCR or upload, so this costs nothing.
 
 ## [1.3.1] - 2026-10-04
 
-### Fixed
 - OCR no longer fails with `Permission denied: '/root/.fonts'` on pages
   that need a system font. The watcher, and `docker exec … scanbutler`,
   ran as `abc` with root's home folder, which `abc` may not read; their

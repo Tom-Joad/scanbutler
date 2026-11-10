@@ -83,13 +83,16 @@ def group_segments(pages: list[Page], decisions: list[boundaries.Decision]) -> l
 NEARLY_EMPTY_CHARS = 60
 
 
-def _review_reason(segment: Segment, threshold: float) -> str:
+def _review_reason(segment: Segment, threshold: float, is_blank=lambda page: False) -> str:
     reasons = []
-    first = segment.pages[0]
+    # Blank pages kept in the document (DROP_BLANK_PAGES=false) are no
+    # content: a leading one must not hide a "page 2 of 3" or an empty page.
+    content = [p for p in segment.pages if not is_blank(p)] or segment.pages
+    first = content[0]
     marker = boundaries.page_marker(first)
     if marker and marker[0] > 1:
         reasons.append(f"starts with page {marker[0]} of {marker[1]}; earlier pages missing or misplaced")
-    if len(segment.pages) == 1 and first.text_chars() < NEARLY_EMPTY_CHARS:
+    if len(content) == 1 and first.text_chars() < NEARLY_EMPTY_CHARS:
         reasons.append(f"single, nearly empty page {first.number}")
     if segment.start.confidence < threshold:
         reasons.append(
@@ -166,7 +169,7 @@ def build_plan(
 
     documents = []
     for segment, meta in zip(segments, described):
-        reason = _review_reason(segment, settings.review_confidence)
+        reason = _review_reason(segment, settings.review_confidence, is_blank)
         if not meta.title:
             reason = "; ".join(filter(None, [reason, "no title found"]))
         confidence = min(
