@@ -24,3 +24,6 @@ Thumbs.db
 # Local test data — scans may contain personal or medical information
 data/
 *.pdf
+
+# Claude Code's local settings: approved commands can hold tokens
+.claude/settings.local.json
