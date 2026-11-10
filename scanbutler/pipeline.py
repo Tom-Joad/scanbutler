@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 
 from . import boundaries, metadata, pdfops, priority, retention
 from .config import Profile, Settings
+from .fileio import write_json
 from .naming import build_stem, sanitize, unique_path
 from .llm_cache import CachedChat
 from .ocr import BatchOptions, Page, run_ocr
@@ -82,13 +83,16 @@ def group_segments(pages: list[Page], decisions: list[boundaries.Decision]) -> l
 NEARLY_EMPTY_CHARS = 60
 
 
-def _review_reason(segment: Segment, threshold: float) -> str:
+def _review_reason(segment: Segment, threshold: float, is_blank=lambda page: False) -> str:
     reasons = []
-    first = segment.pages[0]
+    # Blank pages kept in the document (DROP_BLANK_PAGES=false) are no
+    # content: a leading one must not hide a "page 2 of 3" or an empty page.
+    content = [p for p in segment.pages if not is_blank(p)] or segment.pages
+    first = content[0]
     marker = boundaries.page_marker(first)
     if marker and marker[0] > 1:
         reasons.append(f"starts with page {marker[0]} of {marker[1]}; earlier pages missing or misplaced")
-    if len(segment.pages) == 1 and first.text_chars() < NEARLY_EMPTY_CHARS:
+    if len(content) == 1 and first.text_chars() < NEARLY_EMPTY_CHARS:
         reasons.append(f"single, nearly empty page {first.number}")
     if segment.start.confidence < threshold:
         reasons.append(
@@ -131,16 +135,14 @@ def build_plan(
         ]
     if decisions_path is not None:
         # Per-page verdicts with reasons: the first thing to read when a split is wrong.
-        decisions_path.write_text(
-            json.dumps(
-                [
-                    {"page": d.page_index + 1, "starts_new": d.starts_new, "confidence": d.confidence, "reason": d.reason}
-                    for d in decisions
-                ],
-                ensure_ascii=False,
-                indent=1,
-            ),
-            encoding="utf-8",
+        write_json(
+            decisions_path,
+            [
+                {"page": d.page_index + 1, "starts_new": d.starts_new, "confidence": d.confidence, "reason": d.reason}
+                for d in decisions
+            ],
+            ensure_ascii=False,
+            indent=1,
         )
     segments = group_segments(content, decisions)
 
@@ -167,7 +169,7 @@ def build_plan(
 
     documents = []
     for segment, meta in zip(segments, described):
-        reason = _review_reason(segment, settings.review_confidence)
+        reason = _review_reason(segment, settings.review_confidence, is_blank)
         if not meta.title:
             reason = "; ".join(filter(None, [reason, "no title found"]))
         confidence = min(
@@ -369,12 +371,10 @@ def _process_stack(
     if pdfops.page_count(searchable) != len(pages):
         raise RuntimeError("searchable PDF and OCR result disagree on the page count")
 
-    ink_path = work / INK
-    if ink_path.exists():
-        ink = json.loads(ink_path.read_text(encoding="utf-8"))
-    else:
+    ink = _read_ink(work / INK)
+    if ink is None:
         ink = pdfops.ink_coverage(src)
-        ink_path.write_text(json.dumps(ink), encoding="utf-8")
+        write_json(work / INK, ink)
     if len(ink) != len(pages):
         raise RuntimeError("ink measurement and OCR result disagree on the page count")
     pages = [replace(page, ink=value) for page, value in zip(pages, ink)]
@@ -475,6 +475,14 @@ class AlreadyInProgress(Exception):
     """An identical file is being worked on; this one waits for the next round."""
 
 
+def _read_ink(path: Path) -> list[float] | None:
+    """The saved ink measurement, or None if there is none or it can't be read: it is cheap to redo."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def _read_ledger(ledger: Path) -> dict:
     return json.loads(ledger.read_text(encoding="utf-8")) if ledger.exists() else {}
 
@@ -513,7 +521,7 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
         log.info("paperless upload resumed", extra={"source": source, "task": task_id})
     else:
         task_id = client.upload(searchable, src.name, list(profile.paperless.tags))
-        state.write_text(json.dumps({"task_id": task_id}), encoding="utf-8")
+        write_json(state, {"task_id": task_id})
         log.info("paperless uploaded", extra={"source": source, "task": task_id})
 
     task = client.wait(task_id, 5, settings.paperless_max_wait_minutes * 60)
@@ -545,9 +553,7 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
     with _LEDGER_LOCK:  # re-read: other uploads may have finished meanwhile
         uploaded = _read_ledger(ledger)
         uploaded[digest] = {"document": document, "file": source, "date": date.today().isoformat()}
-        tmp = ledger.with_suffix(".tmp")
-        tmp.write_text(json.dumps(uploaded, ensure_ascii=False, indent=1), encoding="utf-8")
-        tmp.replace(ledger)
+        write_json(ledger, uploaded, ensure_ascii=False, indent=1)
     # Nothing left to review: the work copy would only duplicate the document.
     shutil.rmtree(work, ignore_errors=True)
     return document

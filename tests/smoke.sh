@@ -39,6 +39,15 @@ fail() { echo "FAIL: $*" >&2; docker logs "$NAME" >&2 2>&1 || true; exit 1; }
 # random when grep exits early and docker logs gets SIGPIPE.
 in_log() { local out; out=$(docker logs "$NAME" 2>&1); grep -qE -- "$1" <<<"$out"; }
 
+# Wait until the container has left "running" (the init step stopped it).
+wait_stopped() {
+    for _ in $(seq 1 60); do
+        [[ $(docker inspect -f '{{.State.Status}}' "$NAME") != running ]] && return 0
+        sleep 1
+    done
+    return 1
+}
+
 echo "== version"
 version=$(docker run --rm --entrypoint python3 "$IMAGE" -m scanbutler --version)
 [[ $version =~ ^scanbutler\ [0-9]+\.[0-9]+\.[0-9]+$ ]] || fail "unexpected version '$version'"
@@ -66,13 +75,10 @@ print(pypdfium2.PdfDocument(\"out.pdf\")[0].get_textpage().get_text_range())
 grep -q "Leukocytes" <<<"$text" || fail "the fax scan's text layer lacks its text: $text"
 grep -q '"input_streams_unreadable"' <<<"$text" || fail "no warning about the unreadable fax images"
 
-echo "== without MISTRAL_API_KEY the watcher reports a configuration error"
+echo "== without MISTRAL_API_KEY the container stops with a configuration error"
 docker run -d --name "$NAME" "$IMAGE" >/dev/null
-for _ in $(seq 1 30); do
-    in_log '"event":"config_invalid","reason":"MISTRAL_API_KEY' && break
-    sleep 1
-done
-in_log '"event":"config_invalid","reason":"MISTRAL_API_KEY' || fail "no configuration error without MISTRAL_API_KEY"
+wait_stopped || fail "the container keeps running without MISTRAL_API_KEY"
+in_log '^ERROR: MISTRAL_API_KEY' || fail "no ERROR message without MISTRAL_API_KEY"
 docker rm -f "$NAME" >/dev/null
 
 echo "== OCR only: no key needed with the stacks off and SCANNER_NAMING=off"
@@ -85,14 +91,11 @@ in_log '"event":"starting"' || fail "no start without a key in OCR-only mode"
 if in_log '"event":"config_invalid"'; then fail "configuration error in OCR-only mode"; fi
 docker rm -f "$NAME" >/dev/null
 
-echo "== a misspelt language is a configuration error"
+echo "== a misspelt language stops the container with a configuration error"
 docker run -d --name "$NAME" -e MISTRAL_API_KEY="$SECRET" -e OCRMYPDF_LANGUAGES=deu+ger "$IMAGE" >/dev/null
-for _ in $(seq 1 30); do
-    in_log "did you mean 'deu'" && break
-    sleep 1
-done
-in_log "\"event\":\"config_invalid\",\"reason\":\"OCRMYPDF_LANGUAGES: unknown language 'ger' \\(did you mean 'deu'\\?\\)" \
-    || fail "no configuration error for OCRMYPDF_LANGUAGES=deu+ger"
+wait_stopped || fail "the container keeps running with OCRMYPDF_LANGUAGES=deu+ger"
+in_log "^ERROR: OCRMYPDF_LANGUAGES: unknown language 'ger' \\(did you mean 'deu'\\?\\)" \
+    || fail "no ERROR message for OCRMYPDF_LANGUAGES=deu+ger"
 docker rm -f "$NAME" >/dev/null
 
 echo "== a language that can't be downloaded is left out"
@@ -152,12 +155,12 @@ WATCHER_HOME=$(docker exec --user abc "$NAME" sh -c "tr '\\0' '\\n' < /proc/$PID
 
 in_log '"event":"watching inbox","profile":"paperless-2"' || fail "the second Paperless input did not start"
 for _ in $(seq 1 30); do
-    in_log '"event":"tags could not be shared' && break
+    in_log '"event":"objects could not be shared","kind":"tags"' && break
     sleep 1
 done
-in_log '"event":"tags could not be shared' || fail "tag sharing did not run"
-in_log '"event":"correspondents could not be shared' || fail "correspondent sharing did not run"
-in_log '"event":"document types could not be shared' || fail "document type sharing did not run"
+in_log '"event":"objects could not be shared","kind":"tags"' || fail "tag sharing did not run"
+in_log '"event":"objects could not be shared","kind":"correspondents"' || fail "correspondent sharing did not run"
+in_log '"event":"objects could not be shared","kind":"document_types"' || fail "document type sharing did not run"
 [[ $(docker inspect -f '{{.State.Status}}' "$NAME") == running ]] || fail "stopped with Paperless unreachable"
 
 for dir in stacks/inbox scanner/inbox paperless/inbox paperless-2 paperless-2/inbox; do
@@ -177,7 +180,7 @@ done
 echo "== the API returns a searchable PDF with Mistral's text where Tesseract read nothing"
 docker rm -f "$NAME" >/dev/null
 start_api() {
-    docker run -d --name "$NAME" -e PUID="$PUID" -e PGID="$PGID" -e API_ENABLED=true -e MISTRAL_API_KEY="$SECRET" \
+    docker run -d --name "$NAME" -e PUID="${1:-$PUID}" -e PGID="${2:-$PGID}" -e API_ENABLED=true -e MISTRAL_API_KEY="$SECRET" \
         -e MISTRAL_API_BASE=http://127.0.0.1:8999 -e STACKS_ENABLED=false -e SCANNER_ENABLED=false \
         -e OCRMYPDF_LANGUAGES=deu -v "$TESTS:/tests:ro" -v "$WORK/api-config:/config" "$IMAGE" >/dev/null
     docker exec -d "$NAME" python3 /tests/fake_mistral.py
@@ -204,12 +207,25 @@ job=$(tail -n 1 <<<"$kept")
 docker rm -f "$NAME" >/dev/null
 start_api
 for _ in $(seq 40); do docker exec "$NAME" test -f /tmp/scanbutler.heartbeat && break; sleep 1; done
-status=$(docker exec "$NAME" python3 -c "
+job_status() {
+    docker exec "$NAME" python3 -c "
 import sys, httpx
 answer = httpx.get('http://127.0.0.1:8080/api/v1/jobs/' + sys.argv[2], headers={'Authorization': 'Bearer ' + sys.argv[1]})
 print(answer.status_code, answer.json().get('status'))
-" "$token" "$job" 2>&1) || fail "job lookup after re-create: $status"
+" "$token" "$job" 2>&1
+}
+status=$(job_status) || fail "job lookup after re-create: $status"
 [[ $status == "200 done" ]] || fail "after re-creating the container the job says: $status"
+
+echo "== a changed PUID/PGID hands /config over; the token and the job still work"
+docker rm -f "$NAME" >/dev/null
+NEW_PUID=$((PUID + 1)); NEW_PGID=$((PGID + 1))
+start_api "$NEW_PUID" "$NEW_PGID"
+for _ in $(seq 40); do docker exec "$NAME" test -f /tmp/scanbutler.heartbeat && break; sleep 1; done
+status=$(job_status) || fail "job lookup after the PUID change: $status"
+[[ $status == "200 done" ]] || fail "after changing PUID the job says: $status"
+[[ $(stat -c %u "$WORK/api-config/api/tokens.json") == "$NEW_PUID" ]] || fail "tokens.json was not handed to the new PUID"
+if in_log 'Permission denied'; then fail "permission errors after changing PUID"; fi
 
 echo "== a page Mistral refuses fails the job after one request, not one per ocrmypdf mode"
 docker exec "$NAME" sh -c 'rm -f /tmp/fake-mistral-calls; touch /tmp/fake-mistral-refuse'

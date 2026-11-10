@@ -24,12 +24,12 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.concurrency import run_in_threadpool
-from PIL import Image, ImageOps
 
-from . import __version__, logging_setup, pdfops, priority
+from . import __version__, images, logging_setup, pdfops, priority
 from .config import Settings
+from .fileio import write_json
 from .ocr_plugin import HYBRID_DIR, HYBRID_RATE
-from .tokens import TokenStore
+from .tokens import TokensUnreadable, TokenStore
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +46,6 @@ _MAGIC = [
 ]
 CALLBACK_DELAYS = (2, 5)
 LEFTOVER_SECONDS = 3600
-MAX_PAGE_INCHES = 16.5
 
 
 def _now() -> str:
@@ -62,36 +61,13 @@ def sniff(head: bytes) -> str | None:
     return None
 
 
-def image_to_pdf(src: Path, dst: Path) -> None:
-    """A PDF of the image's pages, upright, at its stated or an A4-like resolution."""
-    with Image.open(src) as image:
-        frames = []
-        for index in range(getattr(image, "n_frames", 1)):
-            image.seek(index)
-            frame = ImageOps.exif_transpose(image.copy())
-            frames.append(frame.convert("L" if frame.mode in ("1", "L", "LA", "I;16") else "RGB"))
-        dpi = image.info.get("dpi")
-    longest = max(frames[0].size)
-    stated = float(dpi[0]) if dpi and dpi[0] else 0.0
-    # A scanner states its resolution; phones and cameras write 72 dpi or
-    # nothing, which would make a 4000-pixel photo a 55-inch page that OCR
-    # reads as tiny print. Trust the value only if it gives a page up to A3
-    # (16.5 in); otherwise take the long side as A4 (11.7 in).
-    if stated >= 100 and longest / stated <= MAX_PAGE_INCHES:
-        resolution = stated
-    else:
-        resolution = min(600.0, max(150.0, longest / 11.7))
-    tmp = dst.with_name(dst.name + ".tmp")
-    frames[0].save(tmp, "PDF", resolution=resolution, save_all=True, append_images=frames[1:])
-    tmp.replace(dst)
-
-
 class Jobs:
     """The job folders: job.json with the state, the input, the results."""
 
     def __init__(self, root: Path) -> None:
         self.root = root
         self._lock = threading.Lock()
+        self._unreadable: set[str] = set()
         self.wake = threading.Event()
 
     def folder(self, job_id: str) -> Path:
@@ -100,17 +76,23 @@ class Jobs:
         return self.root / job_id
 
     def read(self, job_id: str) -> dict:
+        """The job; KeyError if it is gone or its job.json can't be read."""
         path = self.folder(job_id) / "job.json"
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             raise KeyError(job_id) from None
+        except (OSError, ValueError) as exc:
+            # Cut off by something outside this program. Said once; cleanup
+            # removes the folder like one without a job.json (leftovers).
+            if job_id not in self._unreadable:
+                self._unreadable.add(job_id)
+                log.error("api job unreadable", extra={"job": job_id, "error": f"{type(exc).__name__}: {exc}"[:200]})
+            raise KeyError(job_id) from None
 
     def write(self, job: dict) -> None:
         path = self.folder(job["id"]) / "job.json"
-        tmp = path.with_name("job.json.tmp")
-        tmp.write_text(json.dumps(job, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(path)
+        write_json(path, job, ensure_ascii=False)
 
     def update(self, job_id: str, **changes) -> dict:
         with self._lock:
@@ -176,8 +158,16 @@ class Jobs:
             self.delete(job_id)
             return True
 
+    @staticmethod
+    def _readable(folder: Path) -> bool:
+        try:
+            json.loads((folder / "job.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return True
+
     def leftovers(self, older_than: float) -> list[Path]:
-        """Uploads and job folders a crash left half made (no job.json), older than `older_than` (epoch)."""
+        """Uploads and job folders a crash left half made (no readable job.json), older than `older_than` (epoch)."""
         found = []
         if not self.root.exists():
             return found
@@ -187,7 +177,7 @@ class Jobs:
                     continue
             except OSError:
                 continue
-            if path.name.startswith(".upload-") or (path.is_dir() and not (path / "job.json").exists()):
+            if path.name.startswith(".upload-") or (path.is_dir() and not self._readable(path)):
                 found.append(path)
         return found
 
@@ -241,7 +231,7 @@ def process(job: dict, folder: Path, settings: Settings) -> int:
     source = folder / f"input.{job['kind']}"
     pdf = source if job["kind"] == "pdf" else folder / "input.pdf"
     if job["kind"] != "pdf" and not pdf.exists():
-        image_to_pdf(source, pdf)
+        images.to_pdf(source, pdf)
     mistral = folder / "mistral"
     mistral.mkdir(exist_ok=True)
     for record in mistral.glob("page-*.json"):  # from an attempt before a restart
@@ -251,6 +241,13 @@ def process(job: dict, folder: Path, settings: Settings) -> int:
         **os.environ,
         HYBRID_DIR: str(mistral),
         HYBRID_RATE: str(settings.work_dir / "api" / "mistral.rate"),
+        # The validated values, not whatever the container's environment holds:
+        # an empty MISTRAL_TIMEOUT would crash the plugin on every page, and
+        # an untrimmed key would reach the Authorization header as it is.
+        "MISTRAL_API_KEY": settings.api_key,
+        "MISTRAL_API_BASE": settings.api_base,
+        "MISTRAL_OCR_MODEL": settings.ocr_model,
+        "MISTRAL_TIMEOUT": str(settings.request_timeout),
         "MISTRAL_MAX_RPS": str(settings.max_rps),
     }
     pdfops.make_searchable(
@@ -266,9 +263,7 @@ def process(job: dict, folder: Path, settings: Settings) -> int:
     if failed:
         raise RuntimeError(f"Mistral OCR failed on page {failed[0][0]}: {failed[0][1]}")
     data = _result_json(job, folder, result)
-    tmp = folder / "result.json.tmp"
-    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(folder / "result.json")
+    write_json(folder / "result.json", data, ensure_ascii=False)
     return len(data["pages"])
 
 
@@ -391,7 +386,10 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
 
     def caller(request: Request) -> str:
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
-        name = tokens.check(token.strip()) if scheme.lower() == "bearer" else None
+        try:
+            name = tokens.check(token.strip()) if scheme.lower() == "bearer" else None
+        except TokensUnreadable:
+            raise HTTPException(503, "the API's token file can't be read; see the log") from None
         if name is None:
             raise HTTPException(401, "a valid API token is needed", headers={"WWW-Authenticate": "Bearer"})
         return name
@@ -440,6 +438,13 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
             kind = sniff(head)
             if kind is None:
                 raise HTTPException(415, "send a PDF, JPEG, PNG, TIFF or WebP file")
+            if kind != "pdf":
+                try:
+                    await run_in_threadpool(images.check, upload)
+                except images.ImageRefused as exc:
+                    raise HTTPException(413, str(exc)) from None
+                except Exception:  # noqa: BLE001 - not an image Pillow can read
+                    raise HTTPException(422, "the file is not a readable image") from None
             filename = Path(filename.strip() or f"upload.{kind}").name[:200] or f"upload.{kind}"
             job = await run_in_threadpool(jobs.create, name, filename, kind, upload, callback_url)
         finally:
@@ -480,7 +485,11 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
     @app.delete("/api/v1/jobs/{job_id}", status_code=204)
     def delete(job_id: str, name: Caller):
         own(job_id, name)
-        if not jobs.delete_unless_running(job_id):
+        try:
+            deleted = jobs.delete_unless_running(job_id)
+        except KeyError:  # the cleanup removed it between the two reads
+            raise HTTPException(404, "no such job") from None
+        if not deleted:
             raise HTTPException(409, "the job is running; delete it when it is done")
         log.info("api job removed", extra={"job": job_id, "reason": "deleted"})
         return Response(status_code=204)
@@ -499,8 +508,11 @@ def serve(settings: Settings, stop: threading.Event) -> list[threading.Thread]:
     root = settings.work_dir / "api"
     jobs = Jobs(root / "jobs")
     tokens = TokenStore(root / "tokens.json")
-    if not tokens.tokens():
-        log.warning("api has no token yet; create one with: scanbutler token add NAME")
+    try:
+        if not tokens.tokens():
+            log.warning("api has no token yet; create one with: scanbutler token add NAME")
+    except TokensUnreadable:
+        pass  # logged by the store; every request answers 503 until the file is fixed
     worker = threading.Thread(target=Worker(jobs, settings, stop).run, name="api-jobs", daemon=True)
     worker.start()
     server = uvicorn.Server(

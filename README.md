@@ -340,7 +340,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `SCANNER_NAMING` | `on` | `off`: scanner files keep their file name and get only the Tesseract text layer; no Mistral, see [OCR only, without Mistral](#ocr-only-without-mistral) |
 | `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE` | `mistral` / `tesseract` | Text for splitting and naming: `mistral` (Mistral OCR) or `tesseract` (free, from the text layer). The scanner falls back to `mistral` when `OCRMYPDF_ENABLED=false` |
 | `WORK_DIR` | `/config` | OCR results, plans and review files |
-| `WORK_RETENTION_DAYS` | `30` | Days after which the work folder of a processed file is deleted; `rebuild` works until then. A `rebuild` restarts the count. `0` keeps everything |
+| `WORK_RETENTION_DAYS` | `30` | Days after which the work folder of a processed file is deleted; `rebuild` works until then. A `rebuild` restarts the count. `0` keeps everything. A fraction is rounded and a negative value counts as 0, with a warning in the log |
 | `TMPDIR` | `$WORK_DIR/tmp` | Temporary page images, several GB for a large stack; on disk, not in RAM |
 | `POLL_INTERVAL` | `30` | Seconds between inbox checks |
 | `STABLE_SECONDS` | `60` | A file must stay unchanged this long before it is picked up. A PDF that isn't completely written (no `%%EOF` at its end), or an empty one, waits up to 10 minutes longer and then moves to `failed/`. Any file still waiting after 10 minutes is named once in the log as `file still waiting`, with the reason |
@@ -417,7 +417,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 | `QUEUE_WEBHOOK_URL` | — | Report queue counts here, see [below](#queue-webhook-home-assistant) |
 | `QUEUE_WEBHOOK_CHECK_SECONDS` | `10` | How often the queue is counted |
 | `QUEUE_WEBHOOK_HEARTBEAT_SECONDS` | `300` | Resend interval without changes |
-| `LOG_LEVEL` | `INFO` | Logs are JSON lines on stdout. Every line logged while a file is being worked on names it in `source` (folder and name below the inbox) |
+| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING` or `ERROR`. Logs are JSON lines on stdout (on stderr for `process`, `rebuild` and `token`, so their result on stdout stays clean). Every line logged while a file is being worked on names it in `source` (folder and name below the inbox) |
 
 ## Languages
 
@@ -723,8 +723,8 @@ kinds that has an owner. Every user with the global permissions for that
 kind may then see and change it.
 
 - The token needs permission to change other users' objects, in practice a
-  superuser's. With a weaker one, `tags could not be shared` (or
-  `correspondents …`, `document types …`) is logged once with HTTP 403, and
+  superuser's. With a weaker one, `objects could not be shared` (with `kind`: `tags`,
+  `correspondents` or `document_types`) is logged once with HTTP 403, and
   the other kinds and the uploads carry on. The same happens while
   Paperless is unreachable.
 - Shared correspondents show every user who writes to whom: a bank, an
@@ -737,12 +737,12 @@ kind may then see and change it.
 - Paperless doesn't allow two ownerless objects of a kind with the same
   name, e.g. a correspondent that you and an AI tagger both created. Such
   an object stays as it is, and the log names it once as
-  `correspondents not shared` with its `id` and the ownerless one it clashes
+  `objects not shared` with its `kind`, its `id` and the ownerless one it clashes
   with (`same_name_as`); all others are shared. Merge the two in Paperless,
   and it is shared in the next round.
 - A check with nothing to do costs one list request per kind. The log says
-  how many were shared, with their ids (`tags shared`,
-  `correspondents shared`, `document types shared`), never their names.
+  how many were shared, with their ids (`objects shared` with `kind`), never
+  their names.
 - Storage paths and custom fields keep their owners.
 
 ## HTTP API
@@ -787,7 +787,10 @@ apply without a restart. A program sees only the jobs it created.
 
 The body is the file itself (no form encoding): a PDF, JPEG, PNG, TIFF or
 WebP. Both query parameters are optional; `filename` names the result.
-Photos are turned upright by their orientation tag. With `callback_url`, Scanbutler posts
+Photos are turned upright by their orientation tag. An image may have up
+to 200 frames (pages) and 4000 megapixels in all; a bigger one is refused
+with `413` before anything is decoded, and so is a file that isn't a
+readable image (`422`). With `callback_url`, Scanbutler posts
 `{"id", "status": "ok"|"failed", "message", "links"}` there when the job is
 finished; the program then fetches the results with its token. If Mistral
 can't read a page (an outage, the spending limit), the job fails with

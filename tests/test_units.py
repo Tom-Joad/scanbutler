@@ -140,34 +140,133 @@ def test_bad_setting_is_logged_as_config_invalid(monkeypatch, capsys, tmp_path):
     assert line["event"] == "config_invalid" and "OCR_MODE" in line["reason"]
 
 
-def test_log_time_is_local_with_offset(monkeypatch):
-    import logging
-    import time as _time
+def test_interactive_commands_log_to_stderr(monkeypatch, capsys, tmp_path):
+    import json as _json
 
-    from scanbutler.logging_setup import JsonFormatter
+    from scanbutler.__main__ import main
 
-    monkeypatch.setenv("TZ", "Europe/Berlin")
-    _time.tzset()
-    try:
-        record = logging.LogRecord("x", logging.INFO, __file__, 1, "starting", None, None)
-        record.created = 1793000000.0  # winter: UTC+1
-        ts = __import__("json").loads(JsonFormatter().format(record))["ts"]
-        assert ts.endswith("+01:00")
-    finally:
-        monkeypatch.delenv("TZ")
-        _time.tzset()
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.setenv("OCR_MODE", "sometimes")
+    assert main(["process", str(tmp_path / "x.pdf")]) == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert _json.loads(err.strip().splitlines()[-1])["event"] == "config_invalid"
 
 
-def test_work_retention_days_is_a_whole_number(monkeypatch, tmp_path):
-    import pytest as _pytest
+def test_an_unexpected_error_is_one_json_line(monkeypatch, capsys, tmp_path):
+    import json as _json
 
-    from scanbutler.config import ConfigError, Settings
+    from scanbutler import __main__ as entry
 
     monkeypatch.setenv("WORK_DIR", str(tmp_path))
     monkeypatch.setenv("MISTRAL_API_KEY", "x")
-    for bad in ("7.5", "-1"):
-        monkeypatch.setenv("WORK_RETENTION_DAYS", bad)
-        with _pytest.raises(ConfigError, match="WORK_RETENTION_DAYS"):
-            Settings.from_env()
+
+    def boom(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", "/config/api/tokens.json")
+
+    monkeypatch.setattr(entry, "run_all", boom)
+    monkeypatch.setattr(entry, "prepare_languages", lambda settings: settings)
+    assert entry.main(["run"]) == 1
+    lines = capsys.readouterr().out.strip().splitlines()
+    crashed = [_json.loads(line) for line in lines if '"crashed"' in line]
+    assert len(crashed) == 1 and "PermissionError" in crashed[0]["error"]
+    assert all(line.startswith("{") for line in lines)  # no bare traceback lines
+
+
+def test_log_time_is_local_with_offset(time_zone):
+    import json
+    import logging
+
+    from scanbutler.logging_setup import JsonFormatter
+
+    time_zone("Europe/Berlin")
+    record = logging.LogRecord("x", logging.INFO, __file__, 1, "starting", None, None)
+    record.created = 1793000000.0  # winter: UTC+1
+    assert json.loads(JsonFormatter().format(record))["ts"].endswith("+01:00")
+
+
+@pytest.fixture
+def valid_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+
+
+def test_work_retention_days_keeps_what_1_9_0_accepted(monkeypatch, valid_env):
     monkeypatch.setenv("WORK_RETENTION_DAYS", "0")
-    assert Settings.from_env().work_retention_days == 0
+    settings = Settings.from_env()
+    assert settings.work_retention_days == 0 and settings.notes == ()
+    for raw, days in (("7.5", 8), ("7.4", 7), ("-1", 0), ("-0.5", 0)):
+        monkeypatch.setenv("WORK_RETENTION_DAYS", raw)
+        settings = Settings.from_env()
+        assert settings.work_retention_days == days and isinstance(days, int)
+        assert any("WORK_RETENTION_DAYS" in note and raw in note for note in settings.notes)
+    monkeypatch.setenv("WORK_RETENTION_DAYS", "soon")
+    with pytest.raises(ConfigError, match="WORK_RETENTION_DAYS"):
+        Settings.from_env()
+
+
+def test_adjusted_settings_are_warned_about_after_starting(monkeypatch, capsys, valid_env):
+    from scanbutler import __main__ as entry
+
+    monkeypatch.setenv("WORK_RETENTION_DAYS", "-1")
+    monkeypatch.setattr(entry, "run_all", lambda *a, **k: None)
+    monkeypatch.setattr(entry, "prepare_languages", lambda settings: settings)
+    assert entry.main(["run"]) == 0
+    assert '"setting adjusted"' in capsys.readouterr().out
+
+
+def test_log_level_is_checked(monkeypatch, valid_env):
+    monkeypatch.setenv("LOG_LEVEL", "verbose")
+    with pytest.raises(ConfigError, match="LOG_LEVEL must be one of"):
+        Settings.from_env()
+    monkeypatch.setenv("LOG_LEVEL", "debug")
+    assert Settings.from_env().log_level == "DEBUG"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("MISTRAL_TIMEOUT", "0"),
+        ("MISTRAL_TIMEOUT", "-3"),
+        ("MISTRAL_MAX_RPS", "-1"),
+        ("PAUSE_RETRY_MINUTES", "-5"),
+        ("PAUSE_RETRY_MINUTES", "0"),
+        ("REVIEW_CONFIDENCE", "7"),
+        ("REVIEW_CONFIDENCE", "-0.1"),
+        ("BLANK_MAX_INK_PERCENT", "nan"),
+        ("BLANK_MAX_INK_PERCENT", "101"),
+        ("BLANK_MAX_INK_PERCENT", "-1"),
+        ("BATCH_MAX_WAIT_HOURS", "-1"),
+        ("BATCH_MAX_WAIT_HOURS", "inf"),
+        ("PAPERLESS_MAX_WAIT_MINUTES", "0"),
+        ("PAPERLESS_SHARE_TAGS_MINUTES", "nan"),
+        ("API_RESULT_HOURS", "0.5"),
+        ("API_PORT", "99999"),
+        ("API_PORT", "0"),
+    ],
+)
+def test_numeric_settings_are_range_checked(monkeypatch, valid_env, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigError, match=name):
+        Settings.from_env()
+
+
+def test_numeric_settings_accept_their_limits(monkeypatch, valid_env):
+    for name, value in (("MISTRAL_MAX_RPS", "0"), ("REVIEW_CONFIDENCE", "1"), ("BLANK_MAX_INK_PERCENT", "100"),
+                        ("API_PORT", "65535"), ("MISTRAL_TIMEOUT", "0.5")):
+        monkeypatch.setenv(name, value)
+    settings = Settings.from_env()
+    assert settings.max_rps == 0 and settings.api_port == 65535 and settings.blank_max_ink == 1
+
+
+def test_check_config_reports_a_bad_setting_in_one_line(monkeypatch, capsys, tmp_path):
+    from scanbutler.__main__ import main
+
+    monkeypatch.setenv("WORK_DIR", str(tmp_path))
+    monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+    assert main(["check-config"]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("MISTRAL_API_KEY is not set") and err.count("\n") == 1
+    monkeypatch.setenv("MISTRAL_API_KEY", "x")
+    assert main(["check-config"]) == 0
+    assert capsys.readouterr() == ("", "")

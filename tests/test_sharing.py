@@ -125,9 +125,9 @@ def test_the_log_carries_ids_not_names(caplog):
     api = FakeApi([tag(1, "Blood count", ADMIN)], correspondents=[obj(10, "Dr. Example", ADMIN)])
     with caplog.at_level(logging.INFO):
         sharer_for(api, kinds=KINDS).check_all()
-    shared = {r.message: r for r in caplog.records if r.message.endswith(" shared")}
-    assert shared["tags shared"].ids == [1] and shared["tags shared"].count == 1
-    assert shared["correspondents shared"].ids == [10]
+    shared = {r.kind: r for r in caplog.records if r.message == "objects shared"}
+    assert shared["tags"].ids == [1] and shared["tags"].count == 1
+    assert shared["correspondents"].ids == [10]
     assert "Blood count" not in caplog.text and "Dr. Example" not in caplog.text
     assert not any("Blood count" in str(vars(r)) or "Dr. Example" in str(vars(r)) for r in caplog.records)
 
@@ -180,7 +180,7 @@ def test_a_kind_the_token_may_not_change_warns_once_and_the_others_go_on(caplog)
         sharer.run(stop)
 
     assert len(rounds) == 3
-    assert sum(r.message == "correspondents could not be shared" for r in caplog.records) == 1
+    assert sum(r.message == "objects could not be shared" and r.kind == "correspondents" for r in caplog.records) == 1
     assert api.store["correspondents"][10]["owner"] == ADMIN
     assert api.tags[1]["owner"] is None  # tags were shared all the same
 
@@ -222,9 +222,9 @@ def test_a_duplicate_name_does_not_hold_up_the_others(caplog):
     store = api.store["correspondents"]
     assert store[3]["owner"] is None and store[4]["owner"] is None
     assert store[2]["owner"] == TAGGER  # left as it was
-    stuck = [r for r in caplog.records if r.message == "correspondents not shared"]
+    stuck = [r for r in caplog.records if r.message == "objects not shared" and r.kind == "correspondents"]
     assert len(stuck) == 1 and stuck[0].id == 2 and stuck[0].same_name_as == 1
-    shared = next(r for r in caplog.records if r.message == "correspondents shared")
+    shared = next(r for r in caplog.records if r.message == "objects shared" and r.kind == "correspondents")
     assert shared.ids == [3, 4]
     assert "Bank" not in caplog.text and "bank" not in str(vars(stuck[0]))
 
@@ -244,4 +244,4 @@ def test_a_merged_duplicate_is_shared_in_the_next_round(caplog):
     with caplog.at_level(logging.INFO):
         sharer.check_all()
     assert api.tags[2]["owner"] is None
-    assert next(r for r in caplog.records if r.message == "tags shared").ids == [2]
+    assert next(r for r in caplog.records if r.message == "objects shared" and r.kind == "tags").ids == [2]
