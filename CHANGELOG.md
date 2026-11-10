@@ -8,6 +8,10 @@ layout, a changed webhook payload) only comes with a new major version.
 ## [Unreleased]
 
 ### Changed
+- The whole Python dependency tree is pinned (about 40 packages, with the
+  package that needs each one), not only the seven direct dependencies. Two
+  builds of one version now contain the same libraries, and Dependabot
+  proposes updates for all of them.
 - Log lines of the OCR plugin and of the Paperless object sharing keep their
   values out of the event name: `page mistral ocr failed` and `page merged`
   carry `page`, `error`, `lines_from_mistral` and `lines_kept` as fields, and
