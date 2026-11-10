@@ -30,10 +30,6 @@ log = logging.getLogger(__name__)
 KINDS = ("tags", "correspondents", "document_types")
 
 
-def _label(kind: str) -> str:
-    return kind.replace("_", " ")
-
-
 def _users(obj: dict, kind: str) -> list[int]:
     return sorted((obj.get("permissions") or {}).get(kind, {}).get("users", []))
 
@@ -72,7 +68,7 @@ class Sharer:
                 shared = self._one_by_one(kind, owned, objects)
             if shared:
                 # Ids, not names: names come from the documents.
-                log.info(f"{_label(kind)} shared", extra={"count": len(shared), "ids": sorted(o["id"] for o in shared)})
+                log.info("objects shared", extra={"kind": kind, "count": len(shared), "ids": sorted(o["id"] for o in shared)})
         if protected:
             self._protect(protected)
 
@@ -87,8 +83,9 @@ class Sharer:
                     self._stuck.add((kind, obj["id"]))
                     same_name = ownerless.get(obj["name"].casefold().strip())
                     log.warning(
-                        f"{_label(kind)} not shared",
+                        "objects not shared",
                         extra={
+                            "kind": kind,
                             "id": obj["id"],
                             # The usual reason; merge the two in Paperless.
                             "same_name_as": same_name,
@@ -133,7 +130,7 @@ class Sharer:
                 # objects (HTTP 403).
                 message = str(exc)[:300]
                 if message != self._last_error.get(kind):
-                    log.warning(f"{_label(kind)} could not be shared", extra={"error": message})
+                    log.warning("objects could not be shared", extra={"kind": kind, "error": message})
                     self._last_error[kind] = message
             except Exception:  # noqa: BLE001 - sharing must never stop the uploads
                 log.exception("sharing failed", extra={"kind": kind})

@@ -24,6 +24,7 @@ import os
 import tempfile
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ocrmypdf import hookimpl
 from ocrmypdf.builtin_plugins.tesseract_ocr import TesseractOcrEngine
@@ -32,6 +33,9 @@ from PIL import Image
 
 from . import hybrid, images
 from .fileio import write_json
+
+if TYPE_CHECKING:
+    from .mistral import MistralClient
 
 log = logging.getLogger(__name__)
 
@@ -44,23 +48,33 @@ _CLIENT = None
 _CLIENT_LOCK = threading.Lock()
 
 
+def client_from_env(environ) -> "MistralClient":
+    """The plugin's Mistral client from the environment api.process hands to ocrmypdf.
+
+    The values are the validated ones from Settings (trimmed, empty means
+    default), taken as they are; see api.process.
+    """
+    from .mistral import MistralClient
+
+    rate = environ.get(HYBRID_RATE, "").strip()
+    return MistralClient(
+        environ.get("MISTRAL_API_KEY", ""),
+        environ.get("MISTRAL_API_BASE", "https://api.mistral.ai/v1"),
+        environ.get("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
+        "",
+        float(environ.get("MISTRAL_TIMEOUT", "300")),
+        max_rps=float(environ.get("MISTRAL_MAX_RPS") or "1"),
+        rate_file=Path(rate) if rate else None,
+    )
+
+
 def _ocr(body: dict) -> dict:
     """POST /ocr with this process's client: one connection, MISTRAL_MAX_RPS kept."""
     global _CLIENT
-    from .mistral import MistralClient
 
     with _CLIENT_LOCK:
         if _CLIENT is None:
-            rate = os.environ.get(HYBRID_RATE, "").strip()
-            _CLIENT = MistralClient(
-                os.environ.get("MISTRAL_API_KEY", ""),
-                os.environ.get("MISTRAL_API_BASE", "https://api.mistral.ai/v1").rstrip("/"),
-                os.environ.get("MISTRAL_OCR_MODEL", "mistral-ocr-latest"),
-                "",
-                float(os.environ.get("MISTRAL_TIMEOUT", "300")),
-                max_rps=float(os.environ.get("MISTRAL_MAX_RPS", "1") or 1),
-                rate_file=Path(rate) if rate else None,
-            )
+            _CLIENT = client_from_env(os.environ)
         client = _CLIENT
     return client._post("/ocr", {"model": client.ocr_model, **body})
 
@@ -113,18 +127,19 @@ class HybridOcrEngine(TesseractOcrEngine):
         record_path = folder / f"page-{page_number + 1:04d}.json"
         try:
             reading, digest = mistral_page(Path(input_file), folder)
+            with Image.open(input_file) as image:
+                width, height = image.size
+            blocks = hybrid.blocks_from_page(reading, width, height)
+            merged, stats = hybrid.merge(page, blocks)
         except Exception as exc:  # noqa: BLE001 - reported per page, see below
             # Raising here would fail ocrmypdf, and its next mode would send
             # the page again (a differently prepared image, so no cache hit):
-            # paid again, to fail again. The page keeps Tesseract's reading;
-            # the record tells the caller that Mistral failed.
-            write_json(record_path, {"page": page_number + 1, "error": str(exc)[:500]})
-            log.warning("page %d: Mistral OCR failed: %s", page_number + 1, exc)
+            # paid again, to fail again. This covers the request and a
+            # malformed answer alike. The page keeps Tesseract's reading; the
+            # record tells the caller that Mistral failed.
+            write_json(record_path, {"page": page_number + 1, "error": f"{type(exc).__name__}: {exc}"[:500]})
+            log.warning("page mistral ocr failed", extra={"page": page_number + 1, "error": str(exc)[:300]})
             return page, hybrid.text_of(page)
-        with Image.open(input_file) as image:
-            width, height = image.size
-        blocks = hybrid.blocks_from_page(reading, width, height)
-        merged, stats = hybrid.merge(page, blocks)
         record = {
             "page": page_number + 1,
             "image": digest,
@@ -135,7 +150,10 @@ class HybridOcrEngine(TesseractOcrEngine):
             "noise_dropped": stats.noise_dropped,
         }
         write_json(record_path, record)
-        log.info("page %d: %d lines from Mistral, %d kept", page_number + 1, stats.lines_replaced, stats.lines_kept)
+        log.info(
+            "page merged",
+            extra={"page": page_number + 1, "lines_from_mistral": stats.lines_replaced, "lines_kept": stats.lines_kept},
+        )
         return merged, hybrid.text_of(merged)
 
 

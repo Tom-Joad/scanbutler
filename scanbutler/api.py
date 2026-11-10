@@ -29,7 +29,7 @@ from . import __version__, images, logging_setup, pdfops, priority
 from .config import Settings
 from .fileio import write_json
 from .ocr_plugin import HYBRID_DIR, HYBRID_RATE
-from .tokens import TokenStore
+from .tokens import TokensUnreadable, TokenStore
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +67,7 @@ class Jobs:
     def __init__(self, root: Path) -> None:
         self.root = root
         self._lock = threading.Lock()
+        self._unreadable: set[str] = set()
         self.wake = threading.Event()
 
     def folder(self, job_id: str) -> Path:
@@ -75,10 +76,18 @@ class Jobs:
         return self.root / job_id
 
     def read(self, job_id: str) -> dict:
+        """The job; KeyError if it is gone or its job.json can't be read."""
         path = self.folder(job_id) / "job.json"
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
+            raise KeyError(job_id) from None
+        except (OSError, ValueError) as exc:
+            # Cut off by something outside this program. Said once; cleanup
+            # removes the folder like one without a job.json (leftovers).
+            if job_id not in self._unreadable:
+                self._unreadable.add(job_id)
+                log.error("api job unreadable", extra={"job": job_id, "error": f"{type(exc).__name__}: {exc}"[:200]})
             raise KeyError(job_id) from None
 
     def write(self, job: dict) -> None:
@@ -149,8 +158,16 @@ class Jobs:
             self.delete(job_id)
             return True
 
+    @staticmethod
+    def _readable(folder: Path) -> bool:
+        try:
+            json.loads((folder / "job.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return False
+        return True
+
     def leftovers(self, older_than: float) -> list[Path]:
-        """Uploads and job folders a crash left half made (no job.json), older than `older_than` (epoch)."""
+        """Uploads and job folders a crash left half made (no readable job.json), older than `older_than` (epoch)."""
         found = []
         if not self.root.exists():
             return found
@@ -160,7 +177,7 @@ class Jobs:
                     continue
             except OSError:
                 continue
-            if path.name.startswith(".upload-") or (path.is_dir() and not (path / "job.json").exists()):
+            if path.name.startswith(".upload-") or (path.is_dir() and not self._readable(path)):
                 found.append(path)
         return found
 
@@ -224,6 +241,13 @@ def process(job: dict, folder: Path, settings: Settings) -> int:
         **os.environ,
         HYBRID_DIR: str(mistral),
         HYBRID_RATE: str(settings.work_dir / "api" / "mistral.rate"),
+        # The validated values, not whatever the container's environment holds:
+        # an empty MISTRAL_TIMEOUT would crash the plugin on every page, and
+        # an untrimmed key would reach the Authorization header as it is.
+        "MISTRAL_API_KEY": settings.api_key,
+        "MISTRAL_API_BASE": settings.api_base,
+        "MISTRAL_OCR_MODEL": settings.ocr_model,
+        "MISTRAL_TIMEOUT": str(settings.request_timeout),
         "MISTRAL_MAX_RPS": str(settings.max_rps),
     }
     pdfops.make_searchable(
@@ -362,7 +386,10 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
 
     def caller(request: Request) -> str:
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
-        name = tokens.check(token.strip()) if scheme.lower() == "bearer" else None
+        try:
+            name = tokens.check(token.strip()) if scheme.lower() == "bearer" else None
+        except TokensUnreadable:
+            raise HTTPException(503, "the API's token file can't be read; see the log") from None
         if name is None:
             raise HTTPException(401, "a valid API token is needed", headers={"WWW-Authenticate": "Bearer"})
         return name
@@ -458,7 +485,11 @@ def create_app(settings: Settings, jobs: Jobs, tokens: TokenStore) -> FastAPI:
     @app.delete("/api/v1/jobs/{job_id}", status_code=204)
     def delete(job_id: str, name: Caller):
         own(job_id, name)
-        if not jobs.delete_unless_running(job_id):
+        try:
+            deleted = jobs.delete_unless_running(job_id)
+        except KeyError:  # the cleanup removed it between the two reads
+            raise HTTPException(404, "no such job") from None
+        if not deleted:
             raise HTTPException(409, "the job is running; delete it when it is done")
         log.info("api job removed", extra={"job": job_id, "reason": "deleted"})
         return Response(status_code=204)
@@ -477,8 +508,11 @@ def serve(settings: Settings, stop: threading.Event) -> list[threading.Thread]:
     root = settings.work_dir / "api"
     jobs = Jobs(root / "jobs")
     tokens = TokenStore(root / "tokens.json")
-    if not tokens.tokens():
-        log.warning("api has no token yet; create one with: scanbutler token add NAME")
+    try:
+        if not tokens.tokens():
+            log.warning("api has no token yet; create one with: scanbutler token add NAME")
+    except TokensUnreadable:
+        pass  # logged by the store; every request answers 503 until the file is fixed
     worker = threading.Thread(target=Worker(jobs, settings, stop).run, name="api-jobs", daemon=True)
     worker.start()
     server = uvicorn.Server(
