@@ -60,7 +60,7 @@ markdown-it-py==4.3.0
     # via rich
 mdurl==0.1.2
     # via markdown-it-py
-ocrmypdf==17.13.0
+ocrmypdf==17.14.1
     # via direct dependency
 opentelemetry-api==1.45.2
     # via fastapi
