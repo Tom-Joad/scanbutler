@@ -192,8 +192,6 @@ def _run_batches(
                 write_json(state_path, jobs)
             raise
         entry.update(ids, chunks=[start for start, _ in group])
-        if entry not in jobs:
-            jobs.append(entry)
         write_json(state_path, jobs)
 
     unsent = [start for start in by_start if start not in submitted]

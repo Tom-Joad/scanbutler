@@ -140,6 +140,11 @@ class InboxWatcher:
         shutil.move(str(src), target)
         return target
 
+    def _skip_probe(self) -> None:
+        """The file said nothing about the Mistral account: let another one probe."""
+        if self.profile.uses_mistral:
+            self.gate.skip_probe()
+
     def _archive(self, path: Path, folder: PurePosixPath, digest: str | None) -> None:
         """Move a processed original to archive/ and, for an upload, close its ledger entry."""
         if self.profile.upload and digest is None:
@@ -178,7 +183,7 @@ class InboxWatcher:
             log.info("identical file in progress, trying later", extra={"source": (folder / path.name).as_posix()})
             return
         except UploadRecovered as exc:
-            self.gate.skip_probe()  # Mistral was never asked
+            self._skip_probe()
             self._archive(path, folder, exc.digest)
             log.info(
                 "upload found from before a restart, archived",
@@ -217,8 +222,7 @@ class InboxWatcher:
             if outage := unavailable_error_in(exc):
                 # Mistral or the network is down: not this file's fault. Keep
                 # it in the inbox, like for an unreachable Paperless.
-                if self.profile.uses_mistral:
-                    self.gate.skip_probe()
+                self._skip_probe()
                 self._retry_after = time.monotonic() + MISTRAL_RETRY_SECONDS
                 log.warning(
                     "mistral unavailable, retrying later",
@@ -228,8 +232,7 @@ class InboxWatcher:
             if self.stop.is_set():
                 # The service is stopping and may have closed the Mistral
                 # client under this file: whatever failed, it is not broken.
-                if self.profile.uses_mistral:
-                    self.gate.skip_probe()
+                self._skip_probe()
                 log.info("interrupted by shutdown, file stays in the inbox", extra={"profile": self.profile.name, "source": (folder / path.name).as_posix()})
                 return
             if self._signature(path) != before:

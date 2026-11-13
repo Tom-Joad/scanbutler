@@ -503,7 +503,8 @@ def mark_archived(settings: Settings, profile: Profile, digest: str) -> None:
     ledger = settings.work_dir / profile.name / LEDGER
     with _LEDGER_LOCK:
         uploaded = _read_ledger(ledger)
-        if uploaded.get(digest, {}).pop("pending_archive", None) is not None:
+        entry = uploaded.get(digest)
+        if entry and entry.pop("pending_archive", False):
             write_json(ledger, uploaded, ensure_ascii=False, indent=1)
 
 

@@ -57,14 +57,18 @@ def _size(work: Path) -> int:
     return sum(p.stat().st_size for p in work.rglob("*") if p.is_file())
 
 
-def _newest(path: Path) -> float:
-    """Last change of a folder or file, looking at everything inside."""
-    return max((p.stat().st_mtime for p in (path, *path.rglob("*"))), default=0.0)
+def _changed_since(path: Path, cutoff: float) -> bool:
+    """True if the folder or file, or anything inside, changed after `cutoff`."""
+    return any(p.stat().st_mtime > cutoff for p in (path, *path.rglob("*")))
 
 
 def _remove(work: Path, root: Path) -> int:
-    size = _size(work) if work.is_dir() else work.stat().st_size
-    shutil.rmtree(work) if work.is_dir() else work.unlink()
+    if work.is_dir():
+        size = _size(work)
+        shutil.rmtree(work)
+    else:
+        size = work.stat().st_size
+        work.unlink()
     # Sub-folders mirror the inbox; drop the ones left empty.
     parent = work.parent
     while parent != root and parent.is_dir() and not any(parent.iterdir()):
@@ -83,7 +87,7 @@ def _clean_failed_uploads(root: Path, cutoff: float) -> tuple[int, int]:
                 continue
         try:
             # A stored task id means the upload is still being followed or retried.
-            if (work / UPLOAD).exists() or _newest(work) > cutoff:
+            if (work / UPLOAD).exists() or _changed_since(work, cutoff):
                 continue
             freed += _remove(work, root)
         except OSError as exc:
@@ -99,7 +103,7 @@ def _clean_tmp(tmp: Path, cutoff: float) -> tuple[int, int]:
         return removed, freed
     for entry in list(tmp.iterdir()):
         try:
-            if _newest(entry) > cutoff:
+            if _changed_since(entry, cutoff):
                 continue
             freed += _remove(entry, tmp)
         except OSError as exc:
