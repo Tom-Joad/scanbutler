@@ -162,3 +162,70 @@ def test_a_leading_blank_page_does_not_hide_the_review_checks(settings, tmp_path
     [doc] = plan.documents
     assert doc.pages == "1-3"  # the blank page is kept, sorted to the front
     assert doc.needs_review and "starts with page 2 of 3" in doc.review_reason
+
+
+def _two_stacks_same_name(settings, tmp_path):
+    """Stack A and stack B both end up with a document called "Rechnung undated.pdf"."""
+    stacks = settings.profile("stacks")
+    texts_a = ["LETTER Rechnung\nBetrag 42 EUR fuer Laborleistungen nach GOAE, zahlbar in 30 Tagen"]
+    texts_b = ["LETTER Rechnung\nBetrag 99 EUR fuer Laborleistungen nach GOAE, zahlbar in 30 Tagen"]
+    src_a, src_b = tmp_path / "a.pdf", tmp_path / "b.pdf"
+    make_pdf(src_a, 1)
+    make_pdf(src_b, 1)
+    work_a = process_stack(src_a, PurePosixPath(""), settings, FakeBackend(texts_a), stacks)
+    work_b = process_stack(src_b, PurePosixPath(""), settings, FakeBackend(texts_b), stacks)
+    return stacks, work_a, work_b
+
+
+def test_rebuild_leaves_the_same_named_file_of_another_stack_alone(settings, tmp_path):
+    stacks = settings.profile("stacks")
+    src_a, src_b = tmp_path / "a.pdf", tmp_path / "b.pdf"
+    make_pdf(src_a, 1)
+    make_pdf(src_b, 2)  # two pages: B's document differs from A's
+    texts_a = ["LETTER Rechnung\nBetrag 42 EUR fuer Laborleistungen nach GOAE, zahlbar in 30 Tagen"]
+    texts_b = [texts_a[0], "Seite 2 von 2 der Rechnung, Betrag 99 EUR"]
+    work_a = process_stack(src_a, PurePosixPath(""), settings, FakeBackend(texts_a), stacks)
+    (stacks.output / "Rechnung undated.pdf").unlink()  # A's document was taken away (to Paperless, say)
+    process_stack(src_b, PurePosixPath(""), settings, FakeBackend(texts_b), stacks)  # B gets the free name
+    foreign = (stacks.output / "Rechnung undated.pdf").read_bytes()
+
+    written = rebuild(work_a, settings, None)  # A's plan still lists that name
+
+    assert (stacks.output / "Rechnung undated.pdf").read_bytes() == foreign
+    assert titles(written) == ["Rechnung undated (2).pdf"]
+    assert titles(stacks.output.glob("*.pdf")) == ["Rechnung undated (2).pdf", "Rechnung undated.pdf"]
+
+
+def test_rebuild_still_replaces_its_own_unchanged_files(settings, tmp_path):
+    stacks, work_a, _ = _two_stacks_same_name(settings, tmp_path)
+
+    written = rebuild(work_a, settings, None)
+
+    assert titles(written) == ["Rechnung undated.pdf"]
+    assert titles(stacks.output.glob("*.pdf")) == ["Rechnung undated (2).pdf", "Rechnung undated.pdf"]
+
+
+def test_rebuild_of_a_plan_without_hashes_deletes_nothing(settings, tmp_path):
+    stacks, work_a, _ = _two_stacks_same_name(settings, tmp_path)
+    plan_a = json.loads((work_a / PLAN).read_text(encoding="utf-8"))
+    del plan_a["written_sha256"]  # as written by versions before 1.9.3
+    (work_a / PLAN).write_text(json.dumps(plan_a), encoding="utf-8")
+
+    written = rebuild(work_a, settings, None)
+
+    assert titles(written) == ["Rechnung undated (3).pdf"]
+    assert len(list(stacks.output.glob("*.pdf"))) == 3
+
+
+def test_a_title_of_many_multibyte_characters_still_writes_a_file(settings, tmp_path):
+    stacks = settings.profile("stacks")
+    src = tmp_path / "stack.pdf"
+    make_pdf(src, 1)
+    backend = FakeBackend(["LETTER " + "文" * 120 + "\nBetrag 42 EUR fuer Laborleistungen nach GOAE, zahlbar in 30 Tagen"])
+
+    work = process_stack(src, PurePosixPath(""), settings, backend, stacks)
+
+    (written,) = stacks.output.glob("*.pdf")
+    assert len(written.name.encode("utf-8")) <= 255
+    # A plan written by an older version with the same title is reused and now works as well.
+    rebuild(work, settings, None)

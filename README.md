@@ -94,7 +94,7 @@ One image for both: Docker picks the right one.
 | `1.9.0`, `1.9` | A specific release / the latest patch of a minor version |
 | `sha-<commit>` | A specific build |
 
-Images are built by GitHub Actions for every version tag, published to
+Images are built by GitHub Actions for every version tag (and manual workflow runs), published to
 `ghcr.io/tom-joad/scanbutler` and signed keylessly with Sigstore.
 
 ## System requirements
@@ -201,7 +201,11 @@ the same owner as everything else.
    minutes instead of seconds and costs half as much. Job ids and results are
    stored as soon as they exist, so an interrupted run never pays for a page
    twice. Uploads and results are deleted from Mistral's file storage
-   afterwards. A chunk that fails inside a batch is retried directly.
+   afterwards; if the container dies in between, the next run of that file
+   deletes what was recorded. An upload whose answer was lost to a timeout may
+   remain in Mistral's file storage, because the request is not repeated
+   blindly: check the Files page of the Mistral console if that matters to you.
+   A chunk that fails inside a batch is retried directly.
    `OCR_MODE=direct` skips the batch API.
 
    Scanner files skip this step by default. Their text comes from the
@@ -271,7 +275,7 @@ layer shows up as `GlyphLessFont`.
 ## Reviewing and correcting splits
 
 Without separator sheets, splitting cannot be perfect. Every input file gets
-a work directory, `work/<input>/<sub-folder>/<file name>-<hash>/`. It holds:
+a work directory, `/config/<input>/<sub-folder>/<file name>-<hash>/`. It holds:
 
 - `review.md`: every document with its page range. A document is flagged ⚠
   when it starts mid-document (for example on "page 3 of 5"), when it is a
@@ -287,7 +291,7 @@ Set `title` to `""` to have the title and date generated again. Then run:
 docker compose exec scanbutler scanbutler rebuild "stacks/Household/stack-01-1a2b3c4d"
 ```
 
-The files listed in `written_files` are replaced. Nothing is OCR'd again.
+The files listed in `written_files` are replaced, as long as they are still the files the plan wrote (`written_sha256`); a file that was changed or replaced in the meantime stays, and the new document gets a free name. Nothing is OCR'd again.
 
 ## Configuration
 
@@ -486,12 +490,12 @@ long random `webhook_id`, because anyone who knows it can post to it:
 template:
   - triggers:
       - trigger: webhook
-        webhook_id: scan-splitter-queue-CHANGE-ME
+        webhook_id: scanbutler-queue-CHANGE-ME
         allowed_methods: [POST]
         local_only: true
     sensor:
-      - name: Scan-Splitter queue
-        unique_id: scan_splitter_queue
+      - name: Scanbutler queue
+        unique_id: scanbutler_queue
         state: "{{ trigger.json.queued }}"
         unit_of_measurement: files
         attributes:
@@ -499,17 +503,17 @@ template:
           processing: "{{ trigger.json.processing }}"
           stacks_waiting: "{{ trigger.json.profiles.stacks.waiting | default(0) }}"
           scanner_waiting: "{{ trigger.json.profiles.scanner.waiting | default(0) }}"
-      - name: Scan-Splitter failed
-        unique_id: scan_splitter_failed
+      - name: Scanbutler failed
+        unique_id: scanbutler_failed
         state: "{{ trigger.json.failed }}"
         unit_of_measurement: files
-      - name: Scan-Splitter duplicates
-        unique_id: scan_splitter_duplicates
+      - name: Scanbutler duplicates
+        unique_id: scanbutler_duplicates
         state: "{{ trigger.json.duplicates | default(0) }}"
         unit_of_measurement: files
     binary_sensor:
-      - name: Scan-Splitter paused
-        unique_id: scan_splitter_paused
+      - name: Scanbutler paused
+        unique_id: scanbutler_paused
         state: "{{ trigger.json.paused | default(false) }}"
         attributes:
           reason: "{{ trigger.json.pause_reason }}"
@@ -517,7 +521,7 @@ template:
 ```
 
 Then set
-`QUEUE_WEBHOOK_URL=http://<home-assistant>:8123/api/webhook/scan-splitter-queue-CHANGE-ME`.
+`QUEUE_WEBHOOK_URL=http://<home-assistant>:8123/api/webhook/scanbutler-queue-CHANGE-ME`.
 
 ## Spending limit and paused processing
 
@@ -847,13 +851,16 @@ health or financial records.
 - The work directories hold the full OCR text of every input file and a
   searchable copy of it. They are deleted `WORK_RETENTION_DAYS` (30) days
   after the file was processed; until then, `rebuild` can re-cut it. Folders
-  of failed files stay until you delete them.
+  of failed stacks stay until you delete them. For the Paperless inputs, the
+  work folder of an upload that failed or was interrupted is removed after
+  the same number of days; after a successful upload it is removed at once.
+  Leftovers in `/config/tmp` (temporary page images) go after 2 days.
 - Logs contain file names, page numbers and counts, never document text.
   The file names are there on purpose: the log has to show which file is
   being worked on. Keep this in mind before sharing a log, and redact the
   names.
 - The Paperless input keeps no copy once a document is confirmed in
-  Paperless. Only the register of uploaded originals remains: checksum, file
+  Paperless (a failed upload keeps its work folder, see the first point). Only the register of uploaded originals remains: checksum, file
   name, document id and date.
 - API jobs keep the uploaded file, Mistral's reading and the results in
   `/config/api/jobs/` until `API_RESULT_HOURS` (24) after they finished, or
@@ -869,14 +876,14 @@ A Docker template and step-by-step instructions are in
 
 ## Development
 
-There is no local Python setup to maintain: the image contains everything,
-and the tests run inside it. The image ships without pip, so the test run
-installs it first with `ensurepip`.
+CI runs the tests on the runner (`pip install -r requirements.txt pytest`,
+then `pytest -q`) and the smoke test against the built image. Locally, use a
+virtual environment the same way:
 
 ```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pytest
+.venv/bin/pytest -q
 docker build -t scanbutler:dev .
-docker run --rm --entrypoint sh -v "$PWD:/src" -w /src scanbutler:dev \
-  -c "python3 -m ensurepip >/dev/null && python3 -m pip install -q pytest && python3 -m pytest -q"
 ```
 
 The tests replace Mistral with a fake and need no API key. A smoke test
@@ -889,7 +896,7 @@ tests/smoke.sh scanbutler:dev
 
 CI runs both together with `pip-audit`, shellcheck and `gitleaks` on every
 push. Images are built only
-for version tags (`v*`), for `linux/amd64` and `linux/arm64`. Each image is
+for version tags (`v*`) and manual runs of the workflow (`workflow_dispatch`), for `linux/amd64` and `linux/arm64`. Each image is
 signed with cosign and ships an SBOM and provenance.
 
 See [CHANGELOG.md](CHANGELOG.md) for the release history and

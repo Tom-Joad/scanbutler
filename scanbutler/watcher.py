@@ -24,15 +24,19 @@ from .config import Profile, Settings
 from .pdfops import looks_complete
 from .naming import unique_path
 from .notify import QueueReporter
-from .pause import PauseGate, limit_error_in
+from .pause import PauseGate, limit_error_in, unavailable_error_in
 from .paperless import DuplicateFile, PaperlessClient, PaperlessUnavailable, client_for
-from .pipeline import AlreadyInProgress, process_for_paperless, process_stack
+from .pipeline import AlreadyInProgress, UploadRecovered, mark_archived, process_for_paperless, process_stack, sha256
 from .sharing import Sharer
 
 log = logging.getLogger(__name__)
 
 HEARTBEAT = Path("/tmp/scanbutler.heartbeat")
 PAPERLESS_RETRY_SECONDS = 300
+MISTRAL_RETRY_SECONDS = 300
+# On shutdown, how long the workers get to notice the stop before the
+# Mistral client is closed under them.
+SHUTDOWN_GRACE_SECONDS = 15
 HEARTBEAT_SECONDS = 30
 FOLDER_RETRY_SECONDS = 60
 # A PDF without its end, or an empty one, is taken as still being written;
@@ -136,6 +140,19 @@ class InboxWatcher:
         shutil.move(str(src), target)
         return target
 
+    def _skip_probe(self) -> None:
+        """The file said nothing about the Mistral account: let another one probe."""
+        if self.profile.uses_mistral:
+            self.gate.skip_probe()
+
+    def _archive(self, path: Path, folder: PurePosixPath, digest: str | None) -> None:
+        """Move a processed original to archive/ and, for an upload, close its ledger entry."""
+        if self.profile.upload and digest is None:
+            digest = sha256(path)  # of the original, before it is moved
+        self._move(path, self.profile.archive, folder)
+        if self.profile.upload:
+            mark_archived(self.settings, self.profile, digest)
+
     @staticmethod
     def _signature(path: Path) -> tuple[int, int] | None:
         try:
@@ -165,6 +182,13 @@ class InboxWatcher:
             # Next round it is either a known duplicate or, if the other upload failed, uploaded.
             log.info("identical file in progress, trying later", extra={"source": (folder / path.name).as_posix()})
             return
+        except UploadRecovered as exc:
+            self._skip_probe()
+            self._archive(path, folder, exc.digest)
+            log.info(
+                "upload found from before a restart, archived",
+                extra={"profile": self.profile.name, "source": (folder / path.name).as_posix(), "document": exc.document},
+            )
         except DuplicateFile as exc:
             # Nothing to fix and nothing to read: no error file, no traceback.
             if exc.checked_before_upload:
@@ -195,6 +219,22 @@ class InboxWatcher:
                 # sending more until the account accepts work again.
                 self.gate.pause(str(limit))
                 return
+            if outage := unavailable_error_in(exc):
+                # Mistral or the network is down: not this file's fault. Keep
+                # it in the inbox, like for an unreachable Paperless.
+                self._skip_probe()
+                self._retry_after = time.monotonic() + MISTRAL_RETRY_SECONDS
+                log.warning(
+                    "mistral unavailable, retrying later",
+                    extra={"error": str(outage)[:300], "retry_minutes": MISTRAL_RETRY_SECONDS // 60},
+                )
+                return
+            if self.stop.is_set():
+                # The service is stopping and may have closed the Mistral
+                # client under this file: whatever failed, it is not broken.
+                self._skip_probe()
+                log.info("interrupted by shutdown, file stays in the inbox", extra={"profile": self.profile.name, "source": (folder / path.name).as_posix()})
+                return
             if self._signature(path) != before:
                 # Still being written when it was picked up: not a broken file.
                 log.warning(
@@ -214,7 +254,7 @@ class InboxWatcher:
         else:
             if self.profile.uses_mistral:
                 self.gate.done()
-            self._move(path, self.profile.archive, folder)
+            self._archive(path, folder, None)
         finally:
             self._seen.pop(path, None)
             if self.reporter:
@@ -384,5 +424,10 @@ def run_all(settings: Settings, backend) -> None:
         stop.wait(HEARTBEAT_SECONDS)
     if not stop.is_set():
         log.error("stopped: an input or the API is no longer running", extra={"threads": ended()})
-    else:
-        log.info("stopped")
+        stop.set()
+    # The caller closes the Mistral client next; give the workers a moment to
+    # leave their current file first (they are daemons, so a long OCR is not waited for).
+    deadline = time.monotonic() + SHUTDOWN_GRACE_SECONDS
+    for thread in workers:
+        thread.join(max(0.0, deadline - time.monotonic()))
+    log.info("stopped")

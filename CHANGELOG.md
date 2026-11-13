@@ -5,6 +5,50 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Changed
+- `WORK_DIR/tmp` (ocrmypdf's temporary page images) is cleaned too: what a
+  crash left there is removed after 2 days, together with the other
+  retention cleanup. A `TMPDIR` you set yourself is not touched.
+- The work folder of a Paperless upload that failed or was interrupted is
+  removed after `WORK_RETENTION_DAYS` without change, like finished stacks
+  (one that still waits for a Paperless task stays). The Privacy section no
+  longer claims the Paperless input keeps nothing in that case.
+- A Mistral outage no longer moves files to `failed/`: when the network or
+  Mistral (HTTP 408, 429, 502, 503, 504) is still failing after all retries,
+  the file stays in the inbox and is tried again after 5 minutes, like for an
+  unreachable Paperless. A `Retry-After` is honoured up to 2 minutes per try.
+- A `429` counts as the spending limit only when its message names a quota,
+  spending, billing, credit or balance; any other `429`, also one with a body
+  that is no JSON object, is the ordinary rate limit and is retried instead
+  of pausing for 30 minutes.
+- Uploads and batch job creation are not repeated after a read timeout (the
+  request may have reached Mistral, and a second copy would stay there). An
+  upload is recorded before its job exists and a collected job's files before
+  they are deleted; the next start deletes what a crash left.
+- The image declares `VOLUME /data` besides `VOLUME /config`, as the
+  container standard asks. Existing mappings are unaffected.
+
+### Fixed
+- `rebuild` (and a re-run on an existing plan) no longer deletes a file that
+  another stack wrote under a name this plan once used. `plan.json` now stores
+  the sha256 of each written file (`written_sha256`); only a file that still
+  matches is replaced, anything else stays and the new document gets a free
+  name. Plans from earlier versions have no hash, so their files are left in
+  place and the rebuilt documents come with ` (2)` names; delete the old ones
+  by hand.
+- A title of many multi-byte characters (Cyrillic, Chinese, Japanese, emoji)
+  made the stack fail for good, because the file name exceeded 255 bytes; the
+  plan was reused, so retrying failed the same way. Names are now cut at 200
+  UTF-8 bytes without splitting a character.
+- On shutdown the workers get 15 seconds to leave their file before the Mistral
+  client closes; a file that fails because of the stop stays in the inbox
+  without a misleading `stack failed` line.
+- A crash between the Paperless ledger entry and moving the original to
+  `archive/` no longer sends the file to `duplicates/` on the next start: it is
+  archived, and only then counts as a duplicate.
+
 ## [1.9.2] - 2026-11-10
 
 ### Changed

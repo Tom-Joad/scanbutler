@@ -200,3 +200,56 @@ def test_unreadable_batch_state_is_ignored(tmp_path):
     (tmp_path / "ocr" / BATCH_STATE).write_text('[{"job": "j', encoding="utf-8")  # cut off mid-write
 
     assert [p.markdown for p in ocr(tmp_path, backend)] == TEXTS
+
+
+def test_upload_recorded_without_a_job_is_deleted_on_the_next_run(tmp_path):
+    # The process died after the upload, before the job existed.
+    backend = FakeBackend(TEXTS)
+    cache = tmp_path / "ocr"
+    cache.mkdir()
+    (cache / BATCH_STATE).write_text(json.dumps([{"input_file": "orphan", "chunks": [], "chunk_pages": 3}]))
+
+    pages = ocr(tmp_path, backend)
+
+    assert [p.markdown for p in pages] == TEXTS
+    assert backend.deleted[0] == "orphan"
+
+
+def test_files_of_a_collected_job_are_deleted_after_a_crash_before_the_delete(tmp_path):
+    backend = FakeBackend(TEXTS)
+    cache = tmp_path / "ocr"
+    cache.mkdir()
+    job = {
+        "job": "job-x",
+        "input_file": "in-x",
+        "chunks": [0, 3, 6],
+        "chunk_pages": 3,
+        "collected": True,
+        "remote_files": ["in-x", "out-x", None],
+    }
+    (cache / BATCH_STATE).write_text(json.dumps([job]))
+    # Its results were stored already, so nothing is pending but the cleanup.
+    for start in (0, 3, 6):
+        (cache / f"chunk_{start:05d}_3.json").write_text(
+            json.dumps([{"index": 0, "markdown": TEXTS[start], "header": "", "footer": "", "images": []}] * min(3, 7 - start))
+        )
+    # Force a batch run: one chunk missing again.
+    (cache / "chunk_00006_3.json").unlink()
+
+    ocr(tmp_path, backend)
+
+    assert backend.deleted[:2] == ["in-x", "out-x"]
+
+
+def test_failed_job_creation_leaves_no_recorded_upload(tmp_path):
+    class NoJob(FakeBackend):
+        def submit_batch(self, endpoint, model, lines, on_uploaded=None):
+            on_uploaded("in-lost")
+            raise RuntimeError("job creation failed")
+
+    cache = tmp_path / "ocr"
+    try:
+        ocr(tmp_path, NoJob(TEXTS))
+    except RuntimeError:
+        pass
+    assert json.loads((cache / BATCH_STATE).read_text()) == []

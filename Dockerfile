@@ -59,8 +59,9 @@ RUN chmod +x /usr/local/bin/scanbutler \
       /etc/s6-overlay/s6-rc.d/init-scanbutler-config/run /etc/s6-overlay/s6-rc.d/svc-scanbutler/run \
  && printf 'Scanbutler version: %s\n' "$(python3 -c 'import scanbutler; print(scanbutler.__version__)')" > /build_version
 
-# Plans, caches, the upload ledger and temporary page images.
-VOLUME /config
+# Plans, caches, the upload ledger and temporary page images; the input and
+# output folders (stacks/, scanner/, paperless/).
+VOLUME /config /data
 
 # The HTTP API, when API_ENABLED=true.
 EXPOSE 8080

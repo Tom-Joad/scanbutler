@@ -23,11 +23,13 @@ particular interest:
 - path handling that could write or delete outside the configured folders,
   for example through a crafted `plan.json` or file name
 
-The container runs as a non-root user and needs no inbound ports.
+The container runs as a non-root user. It listens on no port unless
+`API_ENABLED=true`: then the HTTP API answers on port 8080, behind its
+tokens, and should only be reachable from your own network.
 
 ## Supply chain
 
-Images are built by GitHub Actions from version tags only. Third-party
+Images are built by GitHub Actions from version tags and manual workflow runs. Third-party
 actions are pinned to commit SHAs. Dependencies are checked with `pip-audit`,
 and the repository is scanned with `gitleaks`. Images are scanned with Trivy
 and signed keylessly with cosign. To verify an image:

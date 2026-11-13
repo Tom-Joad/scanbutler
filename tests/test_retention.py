@@ -9,13 +9,14 @@ from scanbutler.config import Settings
 from scanbutler.pipeline import process_stack
 
 from .conftest import FakeBackend, make_pdf
+from .test_paperless import paperless_settings  # noqa: F401
 
 DAY = 86400
 
 
 def age(work, days):
     old = time.time() - days * DAY
-    for path in work.rglob("*"):
+    for path in (work, *work.rglob("*")):
         os.utime(path, (old, old))
 
 
@@ -60,7 +61,7 @@ def test_zero_switches_cleanup_off(settings, monkeypatch):
     assert work.exists()
 
 
-def test_paperless_ledger_and_temp_files_are_never_touched(settings, monkeypatch):
+def test_paperless_ledger_and_unrelated_folders_are_never_touched(settings, monkeypatch):
     monkeypatch.setenv("PAPERLESS_URL", "http://paperless.test")
     monkeypatch.setenv("PAPERLESS_TOKEN", "t")
     settings = Settings.from_env()
@@ -71,14 +72,11 @@ def test_paperless_ledger_and_temp_files_are_never_touched(settings, monkeypatch
     stray.mkdir()
     (stray / "plan.json").write_text("{}")
     (stray / "review.md").write_text("")
-    tmp = settings.work_dir / "tmp" / "page.png"
-    tmp.parent.mkdir(parents=True)
-    tmp.write_bytes(b"x")
-    for path in (ledger, stray, tmp):
+    for path in (ledger, stray):
         age(path.parent, 400)
 
     assert retention.clean(settings) == (0, 0)
-    assert ledger.exists() and stray.exists() and tmp.exists()
+    assert ledger.exists() and stray.exists()
 
 
 def test_a_processed_file_counts_as_finished(settings, tmp_path):
@@ -93,3 +91,39 @@ def test_a_processed_file_counts_as_finished(settings, tmp_path):
     assert retention.clean(settings)[0] == 1
     assert not work.exists()
     assert list(scanner.output.glob("*.pdf"))  # outputs are not part of it
+
+
+def test_failed_paperless_work_folders_go_but_not_the_ledger_or_waiting_uploads(paperless_settings):
+    root = paperless_settings.work_dir / "paperless"
+    failed = finished(root, "failed-0001", 40)
+    (failed / "review.md").unlink()
+    (failed / "plan.json").unlink()
+    age(failed, 40)
+    waiting = finished(root, "waiting-0002", 40)
+    (waiting / "paperless_task.json").write_text("{}")
+    age(waiting, 40)
+    young = finished(root, "young-0003", 3)
+    (root / "uploaded.json").write_text("{}")
+    age(root / "uploaded.json", 400)
+
+    removed, _ = retention.clean(paperless_settings)
+
+    assert removed == 1
+    assert not failed.exists()
+    assert waiting.exists() and young.exists() and (root / "uploaded.json").exists()
+
+
+def test_old_temp_leftovers_go_recent_ones_stay(settings):
+    tmp = settings.work_dir / "tmp"
+    stale, fresh = tmp / "ocrmypdf.io.abc", tmp / "ocrmypdf.io.live"
+    for folder in (stale, fresh):
+        folder.mkdir(parents=True)
+        (folder / "page.png").write_bytes(b"x" * 100)
+    age(stale, 5)
+    (tmp / "old-file.tmp").write_bytes(b"x")
+    age(tmp / "old-file.tmp", 5)
+
+    retention.clean(settings)
+
+    assert not stale.exists() and not (tmp / "old-file.tmp").exists()
+    assert fresh.exists()

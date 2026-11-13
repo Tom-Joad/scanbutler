@@ -14,9 +14,9 @@ interface; everything it does shows up in the container log.
 
    | Setting | Value |
    |---|---|
-   | Stacks | e.g. `/mnt/user/<share>/scan-splitter/stacks` |
-   | Scanner | e.g. `/mnt/user/<share>/scan-splitter/scanner` |
-   | Paperless | optional, e.g. `/mnt/user/<share>/scan-splitter/paperless` |
+   | Stacks | e.g. `/mnt/user/<share>/scanbutler/stacks` |
+   | Scanner | e.g. `/mnt/user/<share>/scanbutler/scanner` |
+   | Paperless | optional, e.g. `/mnt/user/<share>/scanbutler/paperless` |
    | Config | `/mnt/user/appdata/scanbutler` |
    | `PUID`, `PGID` | `99`, `100` (nobody:users, like Unraid's shares) |
    | `MISTRAL_API_KEY` | your key (masked in the UI); not needed for OCR only (stacks off, `SCANNER_NAMING=off`) |

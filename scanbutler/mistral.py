@@ -15,7 +15,7 @@ import random
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -24,10 +24,22 @@ from . import priority
 log = logging.getLogger(__name__)
 
 _RETRY_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
+# Still failing after every retry, these say the service is down or busy, not
+# that this file is bad. A 500 can be the answer to one unreadable document,
+# so it keeps failing the file (as do 409 and 425).
+_OUTAGE_STATUS = {408, 429, 502, 503, 504}
 
 
 class MistralError(RuntimeError):
     """Raised when the API returns an unusable answer after all retries."""
+
+
+class MistralUnavailable(MistralError):
+    """Mistral could not be reached or kept failing (network, 5xx, rate limit) for all attempts.
+
+    Not the file's fault: the watcher keeps the file in the inbox and tries
+    again later, like for an unreachable Paperless.
+    """
 
 
 class MistralLimitError(MistralError):
@@ -44,6 +56,12 @@ class MistralLimitError(MistralError):
 _LIMIT_STATUS = {401, 402, 403}
 
 
+# Words that mark a 429 as an exhausted quota rather than the per-second
+# rate limit. Any other 429 is treated as the rate limit: it is retried with
+# the server's Retry-After, and a file is never failed for it.
+_QUOTA_WORDS = ("quota", "spend", "billing", "credit", "balance", "insufficient", "monthly")
+
+
 def is_limit_response(response: httpx.Response) -> bool:
     if response.status_code in _LIMIT_STATUS:
         return True
@@ -52,9 +70,21 @@ def is_limit_response(response: httpx.Response) -> bool:
     try:
         body = response.json()
     except ValueError:
-        body = {}
-    ordinary = body.get("type") == "rate_limited" or "rate limit exceeded" in str(body.get("message", "")).lower()
-    return not ordinary
+        return False
+    if not isinstance(body, dict):  # a list, a string, null: nothing to read a quota from
+        return False
+    if body.get("type") == "rate_limited":
+        return False
+    message = str(body.get("message", "")).lower()
+    return "rate limit" not in message and any(word in message for word in _QUOTA_WORDS)
+
+
+# A longer Retry-After than this is not waited out inside one request.
+_MAX_RETRY_AFTER = 120.0
+# Retrying these cannot create a second copy on the server: the request never
+# reached it. After any other transport error (a read timeout, say) the server
+# may have acted already, so uploads and job creation are not repeated.
+_NOT_SENT = (httpx.ConnectError, httpx.ConnectTimeout)
 
 
 class MistralClient:
@@ -154,21 +184,23 @@ class MistralClient:
         delay = min(60.0, 2.0**attempt) + random.uniform(0, 1)
         if retry_after:
             try:
-                delay = max(delay, float(retry_after))
+                delay = max(delay, min(float(retry_after), _MAX_RETRY_AFTER))
             except ValueError:
                 pass
         with self._lock:
             self._cooldown_until = max(self._cooldown_until, time.monotonic() + delay)
         log.warning("api retry", extra={"path": path, "reason": reason, "attempt": attempt, "delay_s": round(delay, 1)})
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    def _request(self, method: str, path: str, *, repeatable: bool = True, **kwargs: Any) -> httpx.Response:
+        """Send with retries. `repeatable=False` (uploads, job creation) is not
+        repeated after a transport error that may have reached the server."""
         for attempt in range(1, self.max_attempts + 1):
             self._wait_for_cooldown()
             try:
                 response = self._http.request(method, path, **kwargs)
             except httpx.TransportError as exc:
-                if attempt == self.max_attempts:
-                    raise MistralError(f"{path}: transport error: {exc}") from exc
+                if attempt == self.max_attempts or not (repeatable or isinstance(exc, _NOT_SENT)):
+                    raise MistralUnavailable(f"{path}: transport error: {exc}") from exc
                 self._back_off(attempt, None, path, type(exc).__name__)
                 continue
 
@@ -182,14 +214,16 @@ class MistralClient:
                 self._back_off(attempt, response.headers.get("retry-after"), path, response.status_code)
                 continue
 
+            if response.status_code in _OUTAGE_STATUS:
+                raise MistralUnavailable(f"{path}: HTTP {response.status_code} after {attempt} attempts: {response.text[:300]}")
             # The error body describes the request problem; it never contains
             # document text, so it is safe to surface.
             raise MistralError(f"{path}: HTTP {response.status_code}: {response.text[:500]}")
 
-        raise MistralError(f"{path}: giving up after {self.max_attempts} attempts")
+        raise MistralUnavailable(f"{path}: giving up after {self.max_attempts} attempts")
 
-    def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        return self._request("POST", path, json=body).json()
+    def _post(self, path: str, body: dict[str, Any], *, repeatable: bool = True) -> dict[str, Any]:
+        return self._request("POST", path, repeatable=repeatable, json=body).json()
 
     # --- OCR ------------------------------------------------------------------
 
@@ -220,19 +254,36 @@ class MistralClient:
 
     # --- Batch API (half price, minutes instead of seconds) --------------------
 
-    def submit_batch(self, endpoint: str, model: str, lines: list[tuple[str, dict[str, Any]]]) -> dict[str, str]:
-        """Upload requests as JSONL and start a batch job. Returns the ids to persist."""
+    def submit_batch(
+        self,
+        endpoint: str,
+        model: str,
+        lines: list[tuple[str, dict[str, Any]]],
+        on_uploaded: Callable[[str], None] | None = None,
+    ) -> dict[str, str]:
+        """Upload requests as JSONL and start a batch job. Returns the ids to persist.
+
+        `on_uploaded` gets the upload's id before the job is created, so the
+        caller can record it: if the process dies in between, the next start
+        deletes the upload. Neither request is repeated after a transport
+        error that may have reached Mistral (a read timeout), as that could
+        leave a second upload or job behind.
+        """
         payload = "".join(json.dumps({"custom_id": cid, "body": body}) + "\n" for cid, body in lines).encode("utf-8")
         uploaded = self._request(
             "POST",
             "/files",
+            repeatable=False,
             files={"file": ("requests.jsonl", payload, "application/jsonl")},
             data={"purpose": "batch"},
         ).json()
+        if on_uploaded:
+            on_uploaded(uploaded["id"])
         try:
             job = self._post(
                 "/batch/jobs",
                 {"input_files": [uploaded["id"]], "model": model, "endpoint": endpoint, "metadata": {"tool": "scanbutler"}},
+                repeatable=False,
             )
         except Exception:
             self.delete_files([uploaded["id"]])
