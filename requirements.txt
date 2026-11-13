@@ -94,7 +94,7 @@ pydantic-core==2.50.4
     # via pydantic
 pygments==2.21.0
     # via rich
-pypdfium2==5.14.0
+pypdfium2==5.15.2
     # via
     #   direct dependency
     #   ocrmypdf
