@@ -792,6 +792,24 @@ def unreleased_body(text):
     return m.group(2).strip("\n") if m else ""
 
 
+def tidy_sections(body):
+    """The body with every `### Section` once (a repeated heading's items are
+    appended to the first one) and one blank line before each heading. Hand-
+    merged [Unreleased] sections have both flaws (ucg-config-backup 2.2.8,
+    scanbutler 1.9.2); the release entry shouldn't copy them."""
+    head, sections = [], {}
+    current = head
+    for line in body.splitlines():
+        m = re.match(r"### (.+?)\s*$", line)
+        if m:
+            current = sections.setdefault(m.group(1), [])
+        else:
+            current.append(line)
+    parts = ["\n".join(head).strip("\n")] if "".join(head).strip() else []
+    parts += [f"### {name}\n" + "\n".join(lines).strip("\n") for name, lines in sections.items()]
+    return "\n\n".join(p.rstrip("\n") for p in parts)
+
+
 def add_to_section(body, section, intro, lines):
     """Append `intro` with `lines` as sub-items to `### section`."""
     block = intro + "".join(f"  - {l}\n" for l in lines)
@@ -838,7 +856,7 @@ def new_changelog(text, lines, repo, updates=()):
     old = m.group(1)
     bracket = m.group(0).startswith("## [")
     unrel = UNRELEASED.search(text)
-    body = unreleased_body(text)
+    body = tidy_sections(unreleased_body(text))
     planned = unrel.group(1) if unrel else None
     # A version planned by hand wins when it is newer than the last release.
     new = planned if planned and vt(planned) > vt(old) else bump(old, body)
