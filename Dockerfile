@@ -1,7 +1,7 @@
 # linuxserver.io's Debian 13 (trixie) base: s6-overlay, PUID/PGID/UMASK/TZ,
 # the abc user and docker mods, as in every linuxserver.io container.
 # Pinned by digest (a multi-arch index); Dependabot proposes new digests.
-FROM ghcr.io/linuxserver/baseimage-debian:trixie@sha256:f53c833d90b227c66bdcf3b73561df6881fc6ecd6938521261b4cfad2c8df6ba
+FROM ghcr.io/linuxserver/baseimage-debian:trixie@sha256:bc626050e94590c7cab4c535efd77627dcb3f51bc2da696e2078179f9dca88cd
 
 # image.source is what makes a GHCR package inherit the repository's
 # visibility instead of staying private on its own.
