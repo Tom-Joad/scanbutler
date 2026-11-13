@@ -74,6 +74,10 @@ class Plan:
     documents: list[PlannedDocument]
     dropped_pages: str = ""
     written_files: list[str] = field(default_factory=list)
+    # sha256 of each written file, same order. A rebuild only deletes a file
+    # that still has this content: the name may since have been taken by
+    # another stack's document. Plans from before 1.9.3 have none.
+    written_sha256: list[str] = field(default_factory=list)
     # Which profile's output folder `folder` and `written_files` are relative to.
     profile: str = "stacks"
     # Where the text for splitting and naming came from (mistral or tesseract).

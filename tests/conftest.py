@@ -59,9 +59,11 @@ class FakeBackend:
     def ocr_pages(result: dict) -> list[dict]:
         return result["pages"]
 
-    def submit_batch(self, endpoint: str, model: str, lines: list) -> dict:
+    def submit_batch(self, endpoint: str, model: str, lines: list, on_uploaded=None) -> dict:
         job = f"job-{len(self.jobs)}"
         self.jobs[job] = lines
+        if on_uploaded:
+            on_uploaded(f"in-{job}")
         return {"job": job, "input_file": f"in-{job}"}
 
     def wait_batch(self, job_id: str, poll_seconds: float, max_wait_seconds: float) -> dict:

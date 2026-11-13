@@ -5,7 +5,7 @@ import threading
 import httpx
 import pytest
 
-from scanbutler.mistral import MistralClient, MistralError, MistralLimitError, is_limit_response
+from scanbutler.mistral import MistralClient, MistralError, MistralLimitError, MistralUnavailable, is_limit_response
 from scanbutler.pause import PauseGate, limit_error_in
 from scanbutler.watcher import InboxWatcher
 
@@ -76,10 +76,10 @@ def test_gate_allows_one_probe_per_retry_interval():
 class RefusingBackend(FakeBackend):
     refuse = True
 
-    def submit_batch(self, endpoint, model, lines):
+    def submit_batch(self, endpoint, model, lines, on_uploaded=None):
         if self.refuse:
             raise MistralLimitError("/files: HTTP 401: {\"detail\":\"Unauthorized\"}")
-        return super().submit_batch(endpoint, model, lines)
+        return super().submit_batch(endpoint, model, lines, on_uploaded)
 
 
 def test_watcher_pauses_keeps_files_and_resumes_after_probe(settings):
@@ -110,3 +110,105 @@ def test_watcher_pauses_keeps_files_and_resumes_after_probe(settings):
     assert not gate.paused
     assert not any(scanner.inbox.iterdir())
     assert len(list(scanner.output.glob("*.pdf"))) == 2
+
+
+def _client(handler, attempts=3):
+    client = MistralClient("key", "https://api.test/v1", "ocr", "llm", max_attempts=attempts)
+    client._http = httpx.Client(base_url="https://api.test/v1", transport=httpx.MockTransport(handler))
+    return client
+
+
+@pytest.mark.parametrize(
+    ("status", "body", "expected"),
+    [
+        (429, {"message": "Too many requests"}, False),  # nothing says "quota": the rate limit
+        (429, ["not", "an", "object"], False),
+        (429, "just text", False),
+        (429, None, False),
+        (429, {"message": "Insufficient credit"}, True),
+    ],
+)
+def test_429_is_only_a_limit_when_it_says_so(status, body, expected):
+    assert is_limit_response(httpx.Response(status, json=body)) is expected
+    assert is_limit_response(httpx.Response(429, content=b"<html>busy</html>")) is False
+
+
+def test_outage_after_all_retries_is_unavailable_not_a_bad_file(monkeypatch):
+    monkeypatch.setattr("scanbutler.mistral.time.sleep", lambda s: None)
+    client = _client(lambda request: httpx.Response(503, text="down"))
+    client._back_off = lambda *a, **k: None
+    with pytest.raises(MistralUnavailable):
+        client.ocr_pdf(b"%PDF")
+
+    def refuse(request):
+        raise httpx.ConnectError("no route", request=request)
+
+    client = _client(refuse)
+    client._back_off = lambda *a, **k: None
+    with pytest.raises(MistralUnavailable):
+        client.ocr_pdf(b"%PDF")
+    # A 400 is the file's fault and stays a plain error.
+    with pytest.raises(MistralError) as caught:
+        _client(lambda request: httpx.Response(400, json={"message": "bad"})).ocr_pdf(b"%PDF")
+    assert not isinstance(caught.value, MistralUnavailable)
+
+
+def test_uploads_are_not_repeated_after_a_read_timeout():
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        raise httpx.ReadTimeout("slow", request=request)
+
+    client = _client(handler)
+    client._back_off = lambda *a, **k: None
+    with pytest.raises(MistralUnavailable):
+        client.submit_batch("/v1/ocr", "m", [("a", {"x": 1})])
+    assert calls == ["/v1/files"]  # one try: the upload may have arrived
+
+
+class DownBackend(FakeBackend):
+    down = True
+
+    def submit_batch(self, endpoint, model, lines, on_uploaded=None):
+        if self.down:
+            raise MistralUnavailable("/files: transport error: ConnectError")
+        return super().submit_batch(endpoint, model, lines, on_uploaded)
+
+
+def test_watcher_keeps_the_file_during_a_mistral_outage_and_retries(settings):
+    scanner = settings.profile("scanner")
+    scanner.inbox.mkdir(parents=True)
+    make_pdf(scanner.inbox / "a.pdf", 1)
+    texts = ["LETTER Rechnung\nBetrag 42 EUR fuer Laborleistungen nach GOAE, zahlbar in 30 Tagen"]
+    backend = DownBackend(texts)
+    watcher = InboxWatcher(settings, scanner, backend, threading.Event())
+
+    watcher.poll_once()
+
+    assert [p.name for p in scanner.inbox.iterdir()] == ["a.pdf"]
+    assert not scanner.failed.exists() or not any(scanner.failed.iterdir())
+    watcher._retry_after = 0.0  # the retry interval passed
+    backend.down = False
+    watcher.poll_once()
+    assert not any(scanner.inbox.iterdir())
+    assert len(list(scanner.output.glob("*.pdf"))) == 1
+
+
+def test_a_failure_while_stopping_leaves_the_file_in_the_inbox(settings):
+    scanner = settings.profile("scanner")
+    scanner.inbox.mkdir(parents=True)
+    make_pdf(scanner.inbox / "a.pdf", 1)
+
+    class Closed(FakeBackend):
+        def submit_batch(self, *args, **kwargs):
+            stop.set()  # SIGTERM arrives; the client is closed under the worker
+            raise RuntimeError("Cannot send a request, as the client has been closed.")
+
+    stop = threading.Event()
+    watcher = InboxWatcher(settings, scanner, Closed(["x"]), stop)
+
+    watcher.poll_once()
+
+    assert [p.name for p in scanner.inbox.iterdir()] == ["a.pdf"]
+    assert not scanner.failed.exists() or not any(scanner.failed.iterdir())

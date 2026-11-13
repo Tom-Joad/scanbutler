@@ -155,6 +155,15 @@ def _run_batches(
     jobs = _load_jobs(state_path)
     by_start = dict(pending)
 
+    # An upload recorded without a job: the process died between the two
+    # requests. Nothing will ever read that file, and it holds the scans.
+    orphans = [job for job in jobs if not job.get("job")]
+    if orphans:
+        log.warning("uploads without a batch job deleted", extra={"uploads": len(orphans)})
+        backend.delete_files([job.get("input_file") for job in orphans])
+        jobs = [job for job in jobs if job.get("job")]
+        write_json(state_path, jobs)
+
     # A job made with another OCR_CHUNK_PAGES holds chunks of a different
     # layout; its answers would never fit the pages asked for now.
     stale = [job for job in jobs if job.get("chunk_pages", chunk_pages) != chunk_pages]
@@ -167,8 +176,24 @@ def _run_batches(
 
     def submit(group: list[tuple[int, bytes]]) -> None:
         lines = [(_custom_id(start), backend.ocr_body(data)) for start, data in group]
-        ids = backend.submit_batch("/v1/ocr", backend.ocr_model, lines)
-        jobs.append({**ids, "chunks": [start for start, _ in group], "chunk_pages": chunk_pages})
+        entry: dict = {}
+
+        def uploaded(file_id: str) -> None:
+            entry.update(input_file=file_id, chunks=[], chunk_pages=chunk_pages)  # no "job" yet
+            jobs.append(entry)
+            write_json(state_path, jobs)
+
+        try:
+            ids = backend.submit_batch("/v1/ocr", backend.ocr_model, lines, on_uploaded=uploaded)
+        except Exception:
+            # The client has deleted the upload again; forget it.
+            if entry in jobs:
+                jobs.remove(entry)
+                write_json(state_path, jobs)
+            raise
+        entry.update(ids, chunks=[start for start, _ in group])
+        if entry not in jobs:
+            jobs.append(entry)
         write_json(state_path, jobs)
 
     unsent = [start for start in by_start if start not in submitted]
@@ -189,9 +214,20 @@ def _run_batches(
     else:
         log.info("resuming batch jobs", extra={"jobs": len(jobs)})
 
+    def delete_remote(job: dict) -> None:
+        files = job.get("remote_files", [job.get("input_file")])
+        if files:
+            backend.delete_files(files)
+            job["remote_files"] = []
+            write_json(state_path, jobs)
+
     for job in jobs:
+        if job.get("collected"):
+            # Collected by an earlier run that may have died before the delete.
+            delete_remote(job)
+            continue
         wanted = [start for start in job["chunks"] if start in by_start]
-        if not wanted or job.get("collected"):
+        if not wanted:
             continue
         finished = backend.wait_batch(job["job"], options.poll_seconds, options.max_wait_seconds)
         results = backend.batch_results(finished)
@@ -206,9 +242,11 @@ def _run_batches(
                 # Not usable (wrong page count): direct OCR asks again.
                 log.warning("batch chunk unusable", extra={"first_page": start + 1, "error": str(exc)[:200]})
         job["collected"] = True
+        # Recorded before the delete: a crash in between is finished on the next start.
+        job["remote_files"] = [job.get("input_file"), finished.get("output_file"), finished.get("error_file")]
         write_json(state_path, jobs)
         # The uploads hold the scans themselves; don't leave them at Mistral.
-        backend.delete_files([job.get("input_file"), finished.get("output_file"), finished.get("error_file")])
+        delete_remote(job)
 
     state_path.unlink(missing_ok=True)
 

@@ -15,17 +15,28 @@ from datetime import datetime, timezone
 log = logging.getLogger(__name__)
 
 
-def limit_error_in(exc: BaseException) -> BaseException | None:
-    """The MistralLimitError behind `exc`, following the cause/context chain."""
-    from .mistral import MistralLimitError
-
+def _find(exc: BaseException, kind: type) -> BaseException | None:
     seen = set()
     while exc is not None and id(exc) not in seen:
-        if isinstance(exc, MistralLimitError):
+        if isinstance(exc, kind):
             return exc
         seen.add(id(exc))
         exc = exc.__cause__ or exc.__context__
     return None
+
+
+def limit_error_in(exc: BaseException) -> BaseException | None:
+    """The MistralLimitError behind `exc`, following the cause/context chain."""
+    from .mistral import MistralLimitError
+
+    return _find(exc, MistralLimitError)
+
+
+def unavailable_error_in(exc: BaseException) -> BaseException | None:
+    """The MistralUnavailable behind `exc` (an outage, not a bad file), if any."""
+    from .mistral import MistralUnavailable
+
+    return _find(exc, MistralUnavailable)
 
 
 class PauseGate:

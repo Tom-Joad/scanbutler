@@ -378,3 +378,32 @@ def test_a_rejected_token_names_its_setting(tmp_path, monkeypatch):
     client._http = httpx.Client(base_url="http://paperless.test:8000", transport=httpx.MockTransport(lambda r: httpx.Response(401)))
     with pytest.raises(PaperlessUnavailable, match="check PAPERLESS_2_TOKEN"):
         client.upload(pdf, "a.pdf", [])
+
+
+def test_crash_between_ledger_and_archive_archives_instead_of_duplicate(paperless_settings, monkeypatch):
+    client = FakePaperless()
+    watcher, profile, _ = watcher_for(paperless_settings, client)
+    make_pdf(profile.inbox / "a.pdf", 1)
+    original = watcher._move
+
+    def dies(src, root, folder):
+        raise SystemExit("killed before the move")
+
+    monkeypatch.setattr(watcher, "_move", dies)
+    with pytest.raises(SystemExit):
+        watcher.process(profile.inbox / "a.pdf")
+    monkeypatch.setattr(watcher, "_move", original)
+    assert (profile.inbox / "a.pdf").exists() and len(client.uploads) == 1
+
+    watcher.poll_once()  # after the restart
+
+    assert (profile.archive / "a.pdf").exists()
+    assert not profile.duplicates.exists() or not any(profile.duplicates.iterdir())
+    assert len(client.uploads) == 1
+    ledger = json.loads((paperless_settings.work_dir / "paperless" / "uploaded.json").read_text(encoding="utf-8"))
+    assert not any("pending_archive" in entry for entry in ledger.values())
+
+    # The same scan dropped in again later is a real duplicate.
+    make_pdf(profile.inbox / "a.pdf", 1)
+    watcher.poll_once()
+    assert (profile.duplicates / "a.pdf").exists()

@@ -260,12 +260,23 @@ def _write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
     # Validate everything before touching a single file.
     page_lists = [parse_pages(doc.pages, plan.page_count) for doc in plan.documents]
 
-    # A rebuild replaces what the previous run of this plan wrote.
-    for name in plan.written_files:
+    # A rebuild replaces what the previous run of this plan wrote, but only
+    # files that still are what it wrote: unique_path hands out free names, so
+    # another stack may since have written a different document under a name
+    # this plan once used (and its own file been moved away meanwhile).
+    for number, name in enumerate(plan.written_files):
         old = (output / name).resolve()
-        if old.is_relative_to(out_root):
-            old.unlink(missing_ok=True)
+        if not old.is_relative_to(out_root) or not old.is_file():
+            continue
+        expected = plan.written_sha256[number] if number < len(plan.written_sha256) else None
+        if expected is None:
+            log.warning("old plan without file hash: file left in place", extra={"file": name})
+        elif sha256(old) != expected:
+            log.warning("file changed since it was written, left in place", extra={"file": name})
+        else:
+            old.unlink()
     plan.written_files = []
+    plan.written_sha256 = []
     plan.save(work / PLAN)
 
     written: list[Path] = []
@@ -280,6 +291,7 @@ def _write_outputs(plan: Plan, work: Path, settings: Settings) -> list[Path]:
         pdfops.write_document(work / SEARCHABLE, indices, target, doc.title or stem, doc.summary)
         written.append(target)
         plan.written_files.append(target.relative_to(output).as_posix())
+        plan.written_sha256.append(sha256(target))
         # Saved per file so a crash mid-way still knows what to clean up.
         plan.save(work / PLAN)
 
@@ -449,8 +461,13 @@ def process_for_paperless(
     """
     digest = sha256(src)
     ledger = settings.work_dir / profile.name / LEDGER
+    source = (folder / src.name).as_posix()
     with _LEDGER_LOCK:
         uploaded = _read_ledger(ledger)
+        if digest in uploaded and uploaded[digest].get("pending_archive") and uploaded[digest].get("file") == source:
+            # Uploaded, then the process died before the original was moved
+            # to archive/. This is that same file, not a second copy.
+            raise UploadRecovered(digest, uploaded[digest]["document"])
         if digest in uploaded:
             # Paperless's own duplicate check compares the uploaded file, and
             # ocrmypdf writes a slightly different PDF every run, so it can't
@@ -465,10 +482,29 @@ def process_for_paperless(
             raise AlreadyInProgress("an identical file is being uploaded right now")
         _UPLOADING.add(digest)
     try:
-        return _upload(src, folder, settings, client, profile, backend, digest, ledger)
+        with retention.in_use(work_dir_for(settings, profile, folder, src, digest)):
+            return _upload(src, folder, settings, client, profile, backend, digest, ledger)
     finally:
         with _LEDGER_LOCK:
             _UPLOADING.discard(digest)
+
+
+class UploadRecovered(Exception):
+    """The file was uploaded before a crash but never archived: the watcher archives it now."""
+
+    def __init__(self, digest: str, document: int | None) -> None:
+        super().__init__(f"already uploaded as Paperless document {document}; only archiving was missing")
+        self.digest = digest
+        self.document = document
+
+
+def mark_archived(settings: Settings, profile: Profile, digest: str) -> None:
+    """The original is in archive/: from now on an identical file is a duplicate."""
+    ledger = settings.work_dir / profile.name / LEDGER
+    with _LEDGER_LOCK:
+        uploaded = _read_ledger(ledger)
+        if uploaded.get(digest, {}).pop("pending_archive", None) is not None:
+            write_json(ledger, uploaded, ensure_ascii=False, indent=1)
 
 
 class AlreadyInProgress(Exception):
@@ -552,7 +588,9 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
             log.warning("paperless content not replaced", extra={"document": document, "error": str(exc)[:300]})
     with _LEDGER_LOCK:  # re-read: other uploads may have finished meanwhile
         uploaded = _read_ledger(ledger)
-        uploaded[digest] = {"document": document, "file": source, "date": date.today().isoformat()}
+        # pending_archive: until the watcher has moved the original to
+        # archive/, this entry is not yet a "duplicate" (see mark_archived).
+        uploaded[digest] = {"document": document, "file": source, "date": date.today().isoformat(), "pending_archive": True}
         write_json(ledger, uploaded, ensure_ascii=False, indent=1)
     # Nothing left to review: the work copy would only duplicate the document.
     shutil.rmtree(work, ignore_errors=True)

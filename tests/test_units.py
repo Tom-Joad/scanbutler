@@ -270,3 +270,14 @@ def test_check_config_reports_a_bad_setting_in_one_line(monkeypatch, capsys, tmp
     monkeypatch.setenv("MISTRAL_API_KEY", "x")
     assert main(["check-config"]) == 0
     assert capsys.readouterr() == ("", "")
+
+
+def test_sanitize_limits_the_name_to_utf8_bytes_without_splitting_a_character():
+    from scanbutler.naming import MAX_STEM_BYTES
+
+    for title in ("ж" * 400, "文" * 400, "😀" * 400, "Ä" * 149 + "😀" * 3):
+        name = sanitize(title)
+        assert 0 < len(name.encode("utf-8")) <= MAX_STEM_BYTES
+        name.encode("utf-8").decode("utf-8")  # still valid text
+    assert len((sanitize("文" * 400) + " (99).pdf").encode("utf-8")) <= 255
+    assert sanitize("a" * 400) == "a" * 150

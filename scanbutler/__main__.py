@@ -15,7 +15,7 @@ from . import __version__, languages, logging_setup, pdfops
 from .config import ConfigError, Settings, available_cpus, default_work_dir, memory_limit_bytes
 from .mistral import MistralClient
 from .paperless import client_for
-from .pipeline import process_for_paperless, process_stack, rebuild
+from .pipeline import mark_archived, process_for_paperless, process_stack, rebuild, sha256
 from .tokens import TokenError, TokenStore
 from .watcher import run_all
 
@@ -88,6 +88,8 @@ def _process_one(args: argparse.Namespace, settings: Settings, client: MistralCl
             document = process_for_paperless(args.pdf, PurePosixPath(args.folder), settings, paperless, profile, client)
         finally:
             paperless.close()
+        # The file stays where it is, so nothing is waiting to be archived.
+        mark_archived(settings, profile, sha256(args.pdf))
         print(f"Paperless document {document}")
     else:
         profile.output.mkdir(parents=True, exist_ok=True)

@@ -11,6 +11,17 @@ _SPACES = re.compile(r"\s+")
 _RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 
 MAX_STEM = 150
+# File systems limit a name to 255 bytes, not characters (ext4, XFS, SMB): 150
+# Cyrillic or Japanese characters are 300 bytes. Room is left for " (99).pdf".
+MAX_STEM_BYTES = 200
+
+
+def _clip(text: str) -> str:
+    """At most MAX_STEM characters and MAX_STEM_BYTES UTF-8 bytes, never splitting a character."""
+    text = text[:MAX_STEM]
+    while len(text.encode("utf-8")) > MAX_STEM_BYTES:
+        text = text[:-1]
+    return text
 
 
 def sanitize(text: str) -> str:
@@ -23,7 +34,7 @@ def sanitize(text: str) -> str:
     text = _SPACES.sub(" ", text).strip(" .")
     if text.upper() in _RESERVED:
         text = f"_{text}"
-    return text[:MAX_STEM].rstrip(" .")
+    return _clip(text).rstrip(" .")
 
 
 def build_stem(pattern: str, title: str, date: str | None, no_date_label: str) -> str:
