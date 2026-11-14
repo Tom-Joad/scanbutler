@@ -26,6 +26,12 @@ INK_CONTRAST = 40
 # against white paper instead, and counts as full of ink, not as empty.
 DARK_MEDIAN = 128
 
+# PDFium is not thread-safe, not even across separate documents: two threads
+# in it at once can crash the whole process. Scans of several profiles, and
+# several scans of one profile, are processed in parallel, so every use of
+# pdfium in this module holds this lock.
+_PDFIUM = threading.Lock()
+
 
 def page_count(path: Path) -> int:
     with pikepdf.open(path) as pdf:
@@ -34,16 +40,17 @@ def page_count(path: Path) -> int:
 
 def page_texts(path: Path) -> list[str]:
     """The text layer of every page, in reading order as stored in the PDF."""
-    doc = pdfium.PdfDocument(str(path))
-    try:
-        texts = []
-        for page in doc:
-            textpage = page.get_textpage()
-            texts.append(textpage.get_text_range())
-            textpage.close()
-        return texts
-    finally:
-        doc.close()
+    with _PDFIUM:
+        doc = pdfium.PdfDocument(str(path))
+        try:
+            texts = []
+            for page in doc:
+                textpage = page.get_textpage()
+                texts.append(textpage.get_text_range())
+                textpage.close()
+            return texts
+        finally:
+            doc.close()
 
 
 def ink_coverage(path: Path, dpi: int = 50) -> list[float]:
@@ -55,27 +62,30 @@ def ink_coverage(path: Path, dpi: int = 50) -> list[float]:
     colour to follow; it is measured against white. This is independent of
     OCR, which matters because OCR models can hallucinate text on blank pages.
     """
-    doc = pdfium.PdfDocument(str(path))
-    try:
-        result = []
-        for page in doc:
-            image = page.render(scale=dpi / 72, grayscale=True).to_pil().convert("L")
-            width, height = image.size
-            image = image.crop((width // 20, height // 20, width - width // 20, height - height // 20))
-            histogram = image.filter(ImageFilter.MedianFilter(3)).histogram()
-            total = sum(histogram)
-            running, background = 0, 255
-            for value, count in enumerate(histogram):
-                running += count
-                if running * 2 >= total:
-                    background = value
-                    break
-            if background < DARK_MEDIAN:
-                background = 255
-            result.append(sum(histogram[: max(0, background - INK_CONTRAST)]) / total)
-        return result
-    finally:
-        doc.close()
+    images = []
+    with _PDFIUM:
+        doc = pdfium.PdfDocument(str(path))
+        try:
+            for page in doc:
+                images.append(page.render(scale=dpi / 72, grayscale=True).to_pil().convert("L"))
+        finally:
+            doc.close()
+    result = []
+    for image in images:
+        width, height = image.size
+        image = image.crop((width // 20, height // 20, width - width // 20, height - height // 20))
+        histogram = image.filter(ImageFilter.MedianFilter(3)).histogram()
+        total = sum(histogram)
+        running, background = 0, 255
+        for value, count in enumerate(histogram):
+            running += count
+            if running * 2 >= total:
+                background = value
+                break
+        if background < DARK_MEDIAN:
+            background = 255
+        result.append(sum(histogram[: max(0, background - INK_CONTRAST)]) / total)
+    return result
 
 
 # ocrmypdf modes, best first. A pure scan gets the full treatment: any old
