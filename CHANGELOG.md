@@ -5,13 +5,22 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.9.4] - 2026-11-14
 
 ### Fixed
 - Scans processed at the same time (in several inputs, or several scans of
   one input) could crash the container with a segmentation
   fault: PDFium, which measures blank pages and reads text layers, is not
   thread-safe. Its use is now serialized.
+
+### Changed
+- Updated dependencies:
+  - ocrmypdf from 17.13.0 to 17.14.1
+  - fastapi from 0.162.0 to 0.162.3
+  - markdown-it-py from 4.2.0 to 4.3.0
+  - pypdfium2 from 5.14.0 to 5.15.2
+  - linuxserver/baseimage-debian from `f53c833` to `bc62605`
+  - pikepdf from 10.17.0 to 10.18.0
 
 ## [1.9.3] - 2026-11-13
 
@@ -710,6 +719,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.9.4]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.3...v1.9.4
 [1.9.3]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.2...v1.9.3
 [1.9.2]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.0...v1.9.1
