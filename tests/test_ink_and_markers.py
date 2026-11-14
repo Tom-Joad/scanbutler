@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import replace
 from pathlib import PurePosixPath
 
@@ -7,6 +9,7 @@ from PIL import Image, ImageDraw
 
 from scanbutler.boundaries import Decision, _apply_markers
 from scanbutler.ocr import Page
+from scanbutler import pdfops
 from scanbutler.pdfops import ink_coverage
 from scanbutler.pipeline import build_plan, keep_name_plan
 
@@ -35,6 +38,43 @@ def test_ink_coverage_separates_blank_tinted_and_text_pages(tmp_path):
     assert coverage[1] == 0
     assert 0.002 < coverage[2] < 0.05  # form lines count although paper is tinted
     assert coverage[3] > 0.01
+
+
+def test_pdfium_is_never_entered_from_two_threads_at_once(tmp_path, monkeypatch):
+    # PDFium isn't thread-safe; parallel scans crashed the process in CI.
+    path = tmp_path / "page.pdf"
+    Image.new("L", (850, 1100), 250).save(path, resolution=100)
+    real = pdfops.pdfium.PdfDocument
+    inside, most = 0, 0
+    count = threading.Lock()
+
+    class Recording:
+        def __init__(self, *args):
+            nonlocal inside, most
+            with count:
+                inside += 1
+                most = max(most, inside)
+            time.sleep(0.02)  # widen the window for an overlap
+            self.doc = real(*args)
+
+        def __iter__(self):
+            return iter(self.doc)
+
+        def close(self):
+            nonlocal inside
+            self.doc.close()
+            with count:
+                inside -= 1
+
+    monkeypatch.setattr(pdfops.pdfium, "PdfDocument", Recording)
+    calls = [lambda: ink_coverage(path), lambda: pdfops.page_texts(path)] * 4
+    threads = [threading.Thread(target=call) for call in calls]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert most == 1
 
 
 def test_hallucinated_text_on_blank_page_is_still_blank():

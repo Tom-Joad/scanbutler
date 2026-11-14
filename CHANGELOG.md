@@ -5,6 +5,14 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- Scans processed at the same time (in several inputs, or several scans of
+  one input) could crash the container with a segmentation
+  fault: PDFium, which measures blank pages and reads text layers, is not
+  thread-safe. Its use is now serialized.
+
 ## [1.9.3] - 2026-11-13
 
 ### Changed
