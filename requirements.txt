@@ -4,7 +4,7 @@
 # refresh the tree by hand: put the direct ones in a requirements.in and run
 # `pip-compile --strip-extras --no-header requirements.in` on Python 3.13,
 # then mark the direct ones again.
-annotated-doc==0.0.5
+annotated-doc==0.0.6
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
