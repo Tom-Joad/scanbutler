@@ -5,6 +5,15 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.9.5] - 2026-11-21
+
+### Changed
+- Updated dependencies:
+  - pikepdf from 10.18.0 to 10.18.2
+  - annotated-doc from 0.0.5 to 0.0.6
+  - ocrmypdf from 17.14.1 to 17.14.2
+  - fastapi from 0.162.3 to 0.163.1
+
 ## [1.9.4] - 2026-11-14
 
 ### Fixed
@@ -719,6 +728,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.9.5]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.4...v1.9.5
 [1.9.4]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.3...v1.9.4
 [1.9.3]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.2...v1.9.3
 [1.9.2]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.1...v1.9.2
