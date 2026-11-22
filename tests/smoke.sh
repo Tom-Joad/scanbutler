@@ -112,11 +112,12 @@ docker rm -f "$NAME" >/dev/null
 
 echo "== start (downloads fra; both Paperless inputs and tag sharing on)"
 mkdir -p "$WORK/config" "$WORK/data"
+DATA_MODE=$(stat -c %a "$WORK/data")
 # An input folder Docker would have created itself belongs to root; the
 # init must hand it to abc.
 docker run --rm --entrypoint sh -v "$WORK/data:/d" "$IMAGE" -c 'mkdir /d/paperless-2' >/dev/null
 # Nothing listens on port 9: Paperless counts as unreachable.
-docker run -d --name "$NAME" -e PUID="$PUID" -e PGID="$PGID" -e MISTRAL_API_KEY="$SECRET" \
+docker run -d --name "$NAME" -e PUID="$PUID" -e PGID="$PGID" -e UMASK=002 -e MISTRAL_API_KEY="$SECRET" \
     -e OCRMYPDF_LANGUAGES=deu+eng+fra ${TESSDATA_URL:+-e TESSDATA_URL="$TESSDATA_URL"} \
     -e PAPERLESS_URL=http://127.0.0.1:9 -e PAPERLESS_TOKEN="$PL_SECRET" \
     -e PAPERLESS_2_TOKEN="$PL2_SECRET" -e PAPERLESS_SHARE_TAGS=true \
@@ -168,6 +169,11 @@ for dir in stacks/inbox scanner/inbox paperless/inbox paperless-2 paperless-2/in
     [[ $(stat -c %u "$WORK/data/$dir") == "$PUID" ]] || fail "$dir not owned by PUID"
 done
 [[ $(stat -c %u "$WORK/config") == "$PUID" ]] || fail "/config not owned by PUID"
+# A handed-over folder gets the mode UMASK asks for (002 -> 775), so the group
+# can delete what the app saves; a folder that already belonged to someone
+# keeps its mode.
+[[ $(stat -c %a "$WORK/data/paperless-2") == 775 ]] || fail "a handed-over folder is not 775 with UMASK=002"
+[[ $(stat -c %a "$WORK/data") == "$DATA_MODE" ]] || fail "a folder owned by someone else changed its mode"
 
 # The API key and the tokens are never written to a file or the log.
 for secret in "$SECRET" "$PL_SECRET" "$PL2_SECRET"; do
