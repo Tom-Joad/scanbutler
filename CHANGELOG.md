@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.9.6] - 2026-11-22
 
 ### Fixed
 - When Docker created an input folder itself (a missing host folder), the
@@ -738,6 +738,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.9.6]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.5...v1.9.6
 [1.9.5]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.4...v1.9.5
 [1.9.4]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.3...v1.9.4
 [1.9.3]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.2...v1.9.3
