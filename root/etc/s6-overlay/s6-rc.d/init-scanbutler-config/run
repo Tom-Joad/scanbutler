@@ -17,14 +17,21 @@ if [[ -z ${LSIO_NON_ROOT_USER} ]]; then
     fi
 
     # Input roots that Docker created itself (a missing host folder, or a
-    # fresh volume) belong to root, and abc couldn't create inbox/ and the
-    # rest there. Only those are handed over; folders that already belong to
-    # someone else are left as they are.
+    # fresh volume) belong to root with mode 755, and abc couldn't create
+    # inbox/ and the rest there. Only those are handed over, and they get the
+    # mode UMASK asks for: with the owner changed alone, the group could not
+    # delete or move what the app saves there. UMASK comes from the
+    # environment, because the base image applies it to services only, not to
+    # this step. Folders that already belong to someone else are left as they
+    # are, mode included.
+    MASK=${UMASK:-022}
+    [[ ${MASK} =~ ^[0-7]{1,4}$ ]] || MASK=022
     for dir in "${DATA_DIR:-/data}" "${STACKS_DIR:-${DATA_DIR:-/data}/stacks}" \
                "${SCANNER_DIR:-${DATA_DIR:-/data}/scanner}" "${PAPERLESS_DIR:-${DATA_DIR:-/data}/paperless}" \
                "${PAPERLESS_2_DIR:-${DATA_DIR:-/data}/paperless-2}"; do
         if [[ -d ${dir} && $(stat -c %u "${dir}") == 0 ]]; then
             lsiown abc:abc "${dir}"
+            chmod "$(printf '%o' $(( 0777 & ~0${MASK} )))" "${dir}"
         fi
     done
 fi

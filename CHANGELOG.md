@@ -5,6 +5,16 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- When Docker created an input folder itself (a missing host folder), the
+  files the app saved there could not be deleted or moved by the group, for
+  example over SMB: the folder was handed to the app but kept Docker's mode
+  `755`. It now gets the mode `UMASK` asks for (`775` with `002`). This only
+  affects folders created from now on; for an existing one run
+  `chmod 775 <folder>` (or Unraid's New Permissions).
+
 ## [1.9.5] - 2026-11-21
 
 ### Changed
