@@ -5,7 +5,7 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.9.7] - 2026-11-23
 
 ### Changed
 - Updated dependencies:
@@ -15,6 +15,14 @@ layout, a changed webhook payload) only comes with a new major version.
   - annotated-doc from 0.0.6 to 0.0.7
   - certifi from 2026.10.23 to 2026.11.20
   - charset-normalizer from 3.5.2 to 3.5.3
+
+### Security
+- Security updates of the distribution packages, picked up by rebuilding the image:
+  - `krb5-locales` 1.21.3-5+deb13u2
+  - `libgssapi-krb5-2` 1.21.3-5+deb13u2
+  - `libk5crypto3` 1.21.3-5+deb13u2
+  - `libkrb5-3` 1.21.3-5+deb13u2
+  - `libkrb5support0` 1.21.3-5+deb13u2
 
 ## [1.9.6] - 2026-11-22
 
@@ -749,6 +757,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.9.7]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.6...v1.9.7
 [1.9.6]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.5...v1.9.6
 [1.9.5]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.4...v1.9.5
 [1.9.4]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.3...v1.9.4
