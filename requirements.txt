@@ -4,7 +4,7 @@
 # refresh the tree by hand: put the direct ones in a requirements.in and run
 # `pip-compile --strip-extras --no-header requirements.in` on Python 3.13,
 # then mark the direct ones again.
-annotated-doc==0.0.6
+annotated-doc==0.0.7
     # via fastapi
 annotated-types==0.8.0
     # via pydantic
@@ -16,19 +16,19 @@ attrs==26.1.0
     # via
     #   jsonschema
     #   referencing
-certifi==2026.10.23
+certifi==2026.11.20
     # via
     #   httpcore
     #   httpx
 cffi==2.1.1
     # via cryptography
-charset-normalizer==3.5.2
+charset-normalizer==3.5.3
     # via pdfminer-six
 click==8.5.1
     # via uvicorn
 cryptography==50.0.2
     # via pdfminer-six
-fastapi==0.163.1
+fastapi==0.165.0
     # via direct dependency
 fonttools==4.68.0
     # via
@@ -86,11 +86,11 @@ pluggy==1.7.0
     # via ocrmypdf
 pycparser==3.12
     # via cffi
-pydantic==2.14.3
+pydantic==2.14.4
     # via
     #   fastapi
     #   ocrmypdf
-pydantic-core==2.50.4
+pydantic-core==2.50.5
     # via pydantic
 pygments==2.21.0
     # via rich

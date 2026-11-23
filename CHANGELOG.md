@@ -5,6 +5,17 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Changed
+- Updated dependencies:
+  - fastapi from 0.163.1 to 0.165.0
+  - pydantic from 2.14.3 to 2.14.4
+  - pydantic-core from 2.50.4 to 2.50.5
+  - annotated-doc from 0.0.6 to 0.0.7
+  - certifi from 2026.10.23 to 2026.11.20
+  - charset-normalizer from 3.5.2 to 3.5.3
+
 ## [1.9.6] - 2026-11-22
 
 ### Fixed
