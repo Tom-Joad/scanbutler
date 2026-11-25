@@ -5,6 +5,12 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [1.9.8] - 2026-11-25
+
+### Security
+- Security updates of the distribution packages, picked up by rebuilding the image:
+  - `libzstd1` 1.5.7+dfsg-1+deb13u1 (CVE-2026-124851)
+
 ## [1.9.7] - 2026-11-23
 
 ### Changed
@@ -757,6 +763,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[1.9.8]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.7...v1.9.8
 [1.9.7]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.6...v1.9.7
 [1.9.6]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.5...v1.9.6
 [1.9.5]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.4...v1.9.5
