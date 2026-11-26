@@ -19,12 +19,22 @@ from PIL import ImageFilter
 
 log = logging.getLogger(__name__)
 
-# Grey levels a pixel must be below the paper colour to count as ink.
-INK_CONTRAST = 40
+# The page is rendered at this resolution to look for ink.
+INK_DPI = 100
+# Grey levels below the paper colour from which a pixel counts as ink. Pale
+# print (a worn ribbon, a faint copy) is only this much darker than paper.
+PALE_CONTRAST = 20
+# Small dark marks (a page number, a signature, a stamp) are looked for in
+# cells of this many pixels; a cell counts when this share of it is at least
+# MARK_CONTRAST darker than paper. A speck of dust fills less of a cell.
+MARK_CONTRAST = 40
+MARK_CELL = 8
+MARK_SHARE = 0.10
 # A page whose median grey is darker than this has no paper to measure
 # against (an X-ray, a dark photo, a black cover sheet): it is measured
 # against white paper instead, and counts as full of ink, not as empty.
 DARK_MEDIAN = 128
+_WORD = re.compile(r"[^\W\d_]{4,}")
 
 # PDFium is not thread-safe, not even across separate documents: two threads
 # in it at once can crash the whole process. Scans of several profiles, and
@@ -53,38 +63,72 @@ def page_texts(path: Path) -> list[str]:
             doc.close()
 
 
-def ink_coverage(path: Path, dpi: int = 50) -> list[float]:
-    """Share of each page's area (0..1) that is visibly darker than the paper.
+@dataclass(frozen=True)
+class Ink:
+    """What a page shows of content: the evidence for calling it empty or not."""
 
-    The threshold follows the page's own background, so tinted paper and
-    pale forms are measured fairly. A 5% margin is ignored (scanner edges),
-    and a median filter removes dust specks. A mostly dark page has no paper
-    colour to follow; it is measured against white. This is independent of
-    OCR, which matters because OCR models can hallucinate text on blank pages.
+    # Share of the page area (0..1) that is visibly darker than the paper.
+    pale: float
+    # Cells of the page that hold small dark marks.
+    marks: int
+    # Words the page's text layer has; 0 if unknown.
+    words: int = 0
+
+    def empty(self, max_pale: float) -> bool:
+        """True only if nothing speaks for content: a page in doubt is not empty."""
+        return self.pale < max_pale and not self.marks and not self.words
+
+
+def count_words(text: str) -> int:
+    """Words of at least four letters. Text recognition on empty paper yields stray characters, not these."""
+    return len(_WORD.findall(text))
+
+
+def _paper(histogram: list[int]) -> int:
+    """The page's own background grey: its median, or white for a mostly dark page."""
+    total, running = sum(histogram), 0
+    for value, count in enumerate(histogram):
+        running += count
+        if running * 2 >= total:
+            return 255 if value < DARK_MEDIAN else value
+    return 255
+
+
+def _measure(image) -> Ink:
+    width, height = image.size
+    # Area: a 5% margin is ignored (scanner edges), and a median filter at
+    # half size removes dust and thin fold lines.
+    area = image.crop((width // 20, height // 20, width - width // 20, height - height // 20))
+    histogram = area.reduce(2).filter(ImageFilter.MedianFilter(3)).histogram()
+    pale = sum(histogram[: max(0, _paper(histogram) - PALE_CONTRAST)]) / sum(histogram)
+    # Marks: page numbers and footnotes sit close to the edge and are too
+    # thin for the filter above, so this looks at full size with a 2% margin.
+    fine = image.crop((width // 50, height // 50, width - width // 50, height - height // 50))
+    threshold = _paper(fine.histogram()) - MARK_CONTRAST
+    dark = fine.point(lambda value: 255 if value < threshold else 0)
+    # Counted on two grids, half a cell apart: a digit that straddles the
+    # cells of one grid sits inside a cell of the other.
+    shifted = dark.crop((MARK_CELL // 2, MARK_CELL // 2, *dark.size))
+    marks = max(sum(grid.reduce(MARK_CELL).histogram()[round(255 * MARK_SHARE) :]) for grid in (dark, shifted))
+    return Ink(pale=pale, marks=marks)
+
+
+def measure_ink(path: Path) -> list[Ink]:
+    """The ink on every page of `path`, measured on the page image.
+
+    The thresholds follow each page's own background, so tinted paper and
+    pale forms are measured fairly. This is independent of OCR, which matters
+    because OCR models can hallucinate text on blank pages.
     """
-    images = []
+    result = []
     with _PDFIUM:
         doc = pdfium.PdfDocument(str(path))
         try:
             for page in doc:
-                images.append(page.render(scale=dpi / 72, grayscale=True).to_pil().convert("L"))
+                # Measured page by page: the images of a big stack would not fit in memory.
+                result.append(_measure(page.render(scale=INK_DPI / 72, grayscale=True).to_pil().convert("L")))
         finally:
             doc.close()
-    result = []
-    for image in images:
-        width, height = image.size
-        image = image.crop((width // 20, height // 20, width - width // 20, height - height // 20))
-        histogram = image.filter(ImageFilter.MedianFilter(3)).histogram()
-        total = sum(histogram)
-        running, background = 0, 255
-        for value, count in enumerate(histogram):
-            running += count
-            if running * 2 >= total:
-                background = value
-                break
-        if background < DARK_MEDIAN:
-            background = 255
-        result.append(sum(histogram[: max(0, background - INK_CONTRAST)]) / total)
     return result
 
 
@@ -491,6 +535,16 @@ def run_group(cmd: list[str], timeout: float, env: dict[str, str] | None = None)
             process.communicate()  # reap it; the pipes close once the group is gone
             raise
         return subprocess.CompletedProcess(cmd, process.returncode, out, err)
+
+
+def drop_pages(src: Path, page_indices: set[int], dst: Path) -> None:
+    """`src` without the given 0-based pages, at `dst`; everything else about the file stays."""
+    tmp = dst.with_name(dst.name + ".tmp")
+    with pikepdf.open(src) as pdf:
+        for index in sorted(page_indices, reverse=True):
+            del pdf.pages[index]
+        pdf.save(tmp)
+    tmp.replace(dst)
 
 
 def write_document(src: Path, page_indices: list[int], dst: Path, title: str, subject: str) -> None:

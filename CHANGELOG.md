@@ -5,9 +5,34 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
-## [Unreleased]
+## [1.10.0] - Unreleased
+
+### Fixed
+- Pages with content were taken for blank and dropped (`DROP_BLANK_PAGES`):
+  whole pages in pale print, a page with only a signature or a handwritten
+  note, and pages with a few lines of small print or just a page number. A
+  page is now dropped only when nothing speaks for content: next to no ink
+  (pale print counts now), no small dark marks, and not a single word in
+  the Tesseract text layer. A page in doubt is kept. Measured on 11,355
+  pages of real scans, the old rule dropped 125 pages, at least 20 of them
+  with content; the new rule drops 28, all of them empty.
+- The Paperless inputs uploaded blank pages, such as the empty backs of a
+  duplex scan. Clearly empty pages are now left out of the upload,
+  following `DROP_BLANK_PAGES` and `BLANK_MAX_INK_PERCENT`; the log names
+  them (`dropped_pages`). The original in `archive/` keeps every page. With
+  `PAPERLESS_TEXT_SOURCE=mistral`, text that Mistral OCR invents on an empty
+  page no longer reaches the document's content. A file with nothing but
+  blank pages now moves to `failed/` instead of becoming an empty document.
 
 ### Changed
+- Fewer pages are dropped as blank than before; see above. Some empty pages
+  now stay, for example the speckled backs of black-and-white scans and
+  backs with a scanner shadow at the edge.
+- `BLANK_MAX_INK_PERCENT` defaults to `0.1` instead of `0.2`, and the ink is
+  measured differently, so a value set by hand may need a new look. With the
+  ink check on, `BLANK_MAX_CHARS` no longer drops a page on its own; it only
+  decides with `BLANK_MAX_INK_PERCENT=0`.
+- Unraid template: `DROP_BLANK_PAGES` is a setting in the advanced view.
 - Updated dependencies:
   - fonttools from 4.68.0 to 4.69.1
   - packaging from 26.3 to 26.4

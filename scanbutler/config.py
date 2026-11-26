@@ -471,8 +471,9 @@ class Settings:
             review_confidence=_float("REVIEW_CONFIDENCE", 0.75, minimum=0, maximum=1),
             drop_blank_pages=_bool("DROP_BLANK_PAGES", True),
             blank_max_chars=_int("BLANK_MAX_CHARS", 15),
-            # Percent of the page area: blank scans measure 0-0.2 %, a sparse text page about 1 %.
-            blank_max_ink=_float("BLANK_MAX_INK_PERCENT", 0.2, minimum=0, maximum=100) / 100,
+            # Percent of the page area. Empty scans measure 0-0.05 %, also with the
+            # other side showing through; a page in pale print starts at about 0.35 %.
+            blank_max_ink=_float("BLANK_MAX_INK_PERCENT", 0.1, minimum=0, maximum=100) / 100,
             metadata_max_chars=_int("METADATA_MAX_CHARS", 24000, minimum=1000),
             title_language=_str("TITLE_LANGUAGE", "the language of the document"),
             filename_pattern=pattern,

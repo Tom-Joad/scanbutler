@@ -36,8 +36,9 @@ the OCR is done by the ScanSnap software on a computer. Point the scanner at
 this inbox, and the files come out searchable and named without any PC
 running.
 
-**Paperless** (optional). Files dropped here only get the Tesseract text
-layer and are then uploaded to [Paperless-ngx](https://docs.paperless-ngx.com/).
+**Paperless** (optional). Files dropped here get the Tesseract text layer,
+lose their blank pages and are then uploaded to
+[Paperless-ngx](https://docs.paperless-ngx.com/).
 Paperless, or an AI tagger working with it such as
 [Zettelrobbe](https://github.com/admonstrator/zettelrobbe), takes care of
 the title, tags and correspondent:
@@ -212,10 +213,19 @@ the same owner as everything else.
    Tesseract layer that step 5 adds anyway. Either input can be switched with
    `STACKS_TEXT_SOURCE` / `SCANNER_TEXT_SOURCE`; see
    [Choosing the text source](#choosing-the-text-source).
-2. **Blank pages.** A page is dropped when its image shows almost no ink,
-   typically the back of a duplex scan. The check uses the image itself, not
-   the OCR text, because OCR models sometimes invent whole paragraphs on an
-   empty page.
+2. **Blank pages.** A page is dropped only when nothing speaks for content,
+   typically the back of a duplex scan. Three things have to hold:
+   - its image shows next to no ink, pale print included
+     (`BLANK_MAX_INK_PERCENT`);
+   - there are no small dark marks on it, such as a page number, a
+     signature or a stamp;
+   - the Tesseract text layer has not a single word there.
+
+   A page in doubt is kept: a blank page too many does no harm, a missing
+   one does. The print of the other side showing through and fold lines do
+   not count as content. Mistral's text plays no part, because OCR models
+   sometimes invent whole paragraphs on an empty page. `DROP_BLANK_PAGES=false`
+   switches the dropping off for all inputs.
 3. **Boundaries** (stacks only). A chat model reads overlapping windows of 12
    pages and decides, page by page, whether a new document starts. It looks at
    letterheads, salutations, headings, dates, layout changes and sentences
@@ -384,9 +394,9 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 |---|---|---|
 | `BOUNDARY_WINDOW` / `BOUNDARY_STEP` | `12` / `6` | Pages per model request, and how far each window moves on |
 | `REVIEW_CONFIDENCE` | `0.75` | Below this model confidence, a document is flagged |
-| `DROP_BLANK_PAGES` | `true` | `false` keeps blank pages with the document before them |
-| `BLANK_MAX_INK_PERCENT` | `0.2` | Pages with less visible ink than this are blank |
-| `BLANK_MAX_CHARS` | `15` | Pages with no image and at most this much text are blank |
+| `DROP_BLANK_PAGES` | `true` | `false` switches blank-page dropping off: blank pages stay with the document before them, and in Paperless uploads |
+| `BLANK_MAX_INK_PERCENT` | `0.1` | A page with less visible ink than this, no small dark marks and no word in its text layer is blank. `0` switches the ink check off: `BLANK_MAX_CHARS` decides then, and Paperless uploads keep every page |
+| `BLANK_MAX_CHARS` | `15` | Only with `BLANK_MAX_INK_PERCENT=0`: pages with no image and at most this much text are blank |
 | `METADATA_MAX_CHARS` | `24000` | Text per document sent for naming; longer documents are shortened in the middle |
 
 **Text layer**
@@ -618,9 +628,13 @@ and tag itself, for example with an AI tagger such as
 1. ocrmypdf adds the Tesseract text layer, with the same settings as for the
    other inputs. By default, no paid service is involved; see
    [Content from Mistral OCR](#content-from-mistral-ocr) for the option.
-2. The PDF is uploaded through `POST /api/documents/post_document/`, keeping
+2. Blank pages are left out of the upload (`DROP_BLANK_PAGES`), recognised
+   by the ink on the page, as for the other inputs. The original in
+   `archive/` keeps every page. A file with nothing but blank pages is not
+   uploaded; it moves to `failed/`.
+3. The PDF is uploaded through `POST /api/documents/post_document/`, keeping
    its file name and adding `PAPERLESS_TAGS`, if set.
-3. The container follows Paperless's consumption task until a document has
+4. The container follows Paperless's consumption task until a document has
    been created. Only then does the original move to `archive/`, and the work
    copy is deleted.
 

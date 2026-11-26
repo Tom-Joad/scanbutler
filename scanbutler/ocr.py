@@ -21,6 +21,7 @@ import pikepdf
 
 from . import priority
 from .fileio import write_json
+from .pdfops import Ink
 
 log = logging.getLogger(__name__)
 
@@ -50,8 +51,8 @@ class Page:
     header: str
     footer: str
     has_images: bool
-    # Measured on the page image (see pdfops.ink_coverage); None if unknown.
-    ink: float | None = None
+    # Measured on the page image (see pdfops.measure_ink); None if unknown.
+    ink: Ink | None = None
 
     @property
     def number(self) -> int:
@@ -63,10 +64,12 @@ class Page:
         return len(_NOISE.sub("", text))
 
     def is_blank(self, max_chars: int, max_ink: float = 0.0) -> bool:
-        # The image decides first: on an empty page OCR models sometimes
-        # invent whole paragraphs, in a language that isn't even there.
-        if self.ink is not None and self.ink < max_ink:
-            return True
+        # The image decides, and it alone: on an empty page OCR models
+        # sometimes invent whole paragraphs, and a page with only a signature
+        # or a page number has next to no text. In doubt a page is kept.
+        if self.ink is not None and max_ink > 0:
+            return self.ink.empty(max_ink)
+        # Without a measurement (BLANK_MAX_INK_PERCENT=0), the text decides.
         return not self.has_images and self.text_chars() <= max_chars
 
 

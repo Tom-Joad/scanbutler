@@ -7,6 +7,7 @@ import time
 
 import pikepdf
 import pytest
+from PIL import Image, ImageDraw
 
 from scanbutler.config import Settings
 
@@ -19,6 +20,19 @@ def make_pdf(path, pages: int) -> None:
         # chunk or call order the page arrives in.
         pdf.pages[i].obj[pikepdf.Name("/TestIndex")] = i
     pdf.save(path)
+
+
+def make_scan(path, *written: bool) -> None:
+    """A scanned PDF, one image per page: lines of text where `written`, empty paper otherwise."""
+    images = []
+    for has_text in written:
+        image = Image.new("L", (850, 1100), 250)
+        if has_text:
+            for row in range(20):
+                # Solid bars stand in for lines of text at the coarse 50 dpi render.
+                ImageDraw.Draw(image).rectangle((80, 80 + row * 45, 760, 92 + row * 45), fill=0)
+        images.append(image)
+    images[0].save(path, save_all=True, append_images=images[1:], resolution=100)
 
 
 class FakeBackend:
