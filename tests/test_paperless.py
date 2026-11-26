@@ -6,7 +6,6 @@ from dataclasses import replace
 
 import httpx
 import pytest
-from PIL import Image, ImageDraw
 
 from scanbutler.config import ConfigError, Settings
 from scanbutler.paperless import PaperlessClient, PaperlessError, PaperlessUnavailable
@@ -14,7 +13,7 @@ from scanbutler.pdfops import page_count
 from scanbutler.pipeline import UPLOAD
 from scanbutler.watcher import InboxWatcher
 
-from .conftest import FakeBackend, make_pdf
+from .conftest import FakeBackend, make_pdf, make_scan
 
 
 class FakePaperless:
@@ -281,27 +280,18 @@ def test_failed_content_update_keeps_the_document(paperless_settings, monkeypatc
     assert (profile.archive / "a.pdf").exists()  # not failed: the document exists in Paperless
 
 
-def _duplex_scan(path, *written: bool) -> None:
-    """A scan with one image per page: text lines where `written`, empty paper otherwise."""
-    images = []
-    for has_text in written:
-        image = Image.new("L", (850, 1100), 250)
-        if has_text:
-            for row in range(20):
-                ImageDraw.Draw(image).rectangle((80, 80 + row * 45, 760, 92 + row * 45), fill=0)
-        images.append(image)
-    images[0].save(path, save_all=True, append_images=images[1:], resolution=100)
-
-
-def test_blank_pages_are_not_uploaded(paperless_settings):
+def test_blank_pages_are_not_uploaded(paperless_settings, caplog):
     settings = replace(paperless_settings, blank_max_ink=0.002)
     client = FakePaperless()
     watcher, profile, _ = watcher_for(settings, client)
-    _duplex_scan(profile.inbox / "duplex.pdf", True, False, True, False)
+    make_scan(profile.inbox / "duplex.pdf", True, False, True, False)
+    caplog.set_level("INFO", logger="scanbutler.pipeline")
 
     watcher.poll_once()
 
     assert client.page_counts == [2]
+    record = next(r for r in caplog.records if r.getMessage() == "blank pages detected")
+    assert record.dropped_pages == "2, 4"  # the only place that names them
     assert page_count(profile.archive / "duplex.pdf") == 4  # the original stays whole
 
 
@@ -309,7 +299,7 @@ def test_blank_pages_stay_with_drop_blank_pages_off(paperless_settings):
     settings = replace(paperless_settings, blank_max_ink=0.002, drop_blank_pages=False)
     client = FakePaperless()
     watcher, profile, _ = watcher_for(settings, client)
-    _duplex_scan(profile.inbox / "duplex.pdf", True, False)
+    make_scan(profile.inbox / "duplex.pdf", True, False)
 
     watcher.poll_once()
 
@@ -321,7 +311,7 @@ def test_a_scan_of_only_blank_pages_fails_before_mistral_is_asked(paperless_sett
     settings = replace(Settings.from_env(), blank_max_ink=0.002)
     client = FakePaperless()
     watcher, profile, backend = watcher_for(settings, client, ["invented", "text"])
-    _duplex_scan(profile.inbox / "empty.pdf", False, False)
+    make_scan(profile.inbox / "empty.pdf", False, False)
 
     watcher.poll_once()
 
@@ -344,7 +334,7 @@ def test_mistral_text_of_blank_pages_stays_out_of_the_content(paperless_settings
 
     watcher, profile, _ = watcher_for(settings, client)
     watcher.backend = ImageBackend(["Front", "Invented on empty paper", "Back"])
-    _duplex_scan(profile.inbox / "duplex.pdf", True, False, True)
+    make_scan(profile.inbox / "duplex.pdf", True, False, True)
 
     watcher.poll_once()
 

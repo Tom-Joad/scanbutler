@@ -515,7 +515,7 @@ def _ink(src: Path, work: Path, page_count: int) -> list[float]:
         ink = pdfops.ink_coverage(src)
         write_json(work / INK, ink)
     if len(ink) != page_count:
-        raise RuntimeError("ink measurement and OCR result disagree on the page count")
+        raise RuntimeError("ink measurement and PDF disagree on the page count")
     return ink
 
 
@@ -556,16 +556,16 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
     # text can't tell a photo from an empty page, and Mistral invents text
     # on empty ones. Checked before Mistral is paid for a scan of nothing.
     blank: set[int] = set()
-    upload = searchable
     if settings.drop_blank_pages:
         ink = _ink(src, work, pdfops.page_count(searchable))
         blank = {index for index, value in enumerate(ink) if value < settings.blank_max_ink}
         if blank and len(blank) == len(ink):
             raise RuntimeError("every page of the scan is blank")
-        log.info("blank pages detected", extra={"blank": len(blank), "content": len(ink) - len(blank)})
-        if blank:
-            upload = work / TRIMMED
-            pdfops.write_document(searchable, [i for i in range(len(ink)) if i not in blank], upload)
+        # No review file here: the log is where the left-out pages are named.
+        log.info(
+            "blank pages detected",
+            extra={"blank": len(blank), "content": len(ink) - len(blank), "dropped_pages": format_pages(list(blank))},
+        )
 
     content = None
     if profile.text_source == "mistral":
@@ -580,6 +580,10 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
         task_id = json.loads(state.read_text(encoding="utf-8"))["task_id"]
         log.info("paperless upload resumed", extra={"source": source, "task": task_id})
     else:
+        upload = searchable
+        if blank:
+            upload = work / TRIMMED
+            pdfops.drop_pages(searchable, blank, upload)
         task_id = client.upload(upload, src.name, list(profile.paperless.tags))
         write_json(state, {"task_id": task_id})
         log.info("paperless uploaded", extra={"source": source, "task": task_id})

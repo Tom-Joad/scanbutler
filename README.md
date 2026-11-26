@@ -36,8 +36,9 @@ the OCR is done by the ScanSnap software on a computer. Point the scanner at
 this inbox, and the files come out searchable and named without any PC
 running.
 
-**Paperless** (optional). Files dropped here only get the Tesseract text
-layer and are then uploaded to [Paperless-ngx](https://docs.paperless-ngx.com/).
+**Paperless** (optional). Files dropped here get the Tesseract text layer,
+lose their blank pages and are then uploaded to
+[Paperless-ngx](https://docs.paperless-ngx.com/).
 Paperless, or an AI tagger working with it such as
 [Zettelrobbe](https://github.com/admonstrator/zettelrobbe), takes care of
 the title, tags and correspondent:
