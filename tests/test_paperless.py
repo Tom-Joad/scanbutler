@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import json
 import threading
+from dataclasses import replace
 
 import httpx
 import pytest
 
 from scanbutler.config import ConfigError, Settings
 from scanbutler.paperless import PaperlessClient, PaperlessError, PaperlessUnavailable
+from scanbutler.pdfops import page_count
 from scanbutler.pipeline import UPLOAD
 from scanbutler.watcher import InboxWatcher
 
-from .conftest import FakeBackend, make_pdf
+from .conftest import FakeBackend, make_pdf, make_scan
 
 
 class FakePaperless:
@@ -19,12 +21,14 @@ class FakePaperless:
         self.outcome, self.result, self.unavailable = outcome, result, unavailable
         self.uploads: list[tuple[str, list[int]]] = []
         self.contents: list[tuple[int, str]] = []
+        self.page_counts: list[int] = []
         self.finished = True
 
     def upload(self, pdf, filename, tags):
         if self.unavailable:
             raise PaperlessUnavailable("ConnectError: connection refused")
         self.uploads.append((filename, tags))
+        self.page_counts.append(page_count(pdf))
         return f"task-{len(self.uploads)}"
 
     def set_content(self, document_id, content):
@@ -274,6 +278,68 @@ def test_failed_content_update_keeps_the_document(paperless_settings, monkeypatc
 
     assert len(client.uploads) == 1
     assert (profile.archive / "a.pdf").exists()  # not failed: the document exists in Paperless
+
+
+def test_blank_pages_are_not_uploaded(paperless_settings, caplog):
+    settings = replace(paperless_settings, blank_max_ink=0.002)
+    client = FakePaperless()
+    watcher, profile, _ = watcher_for(settings, client)
+    make_scan(profile.inbox / "duplex.pdf", True, False, True, False)
+    caplog.set_level("INFO", logger="scanbutler.pipeline")
+
+    watcher.poll_once()
+
+    assert client.page_counts == [2]
+    record = next(r for r in caplog.records if r.getMessage() == "blank pages detected")
+    assert record.dropped_pages == "2, 4"  # the only place that names them
+    assert page_count(profile.archive / "duplex.pdf") == 4  # the original stays whole
+
+
+def test_blank_pages_stay_with_drop_blank_pages_off(paperless_settings):
+    settings = replace(paperless_settings, blank_max_ink=0.002, drop_blank_pages=False)
+    client = FakePaperless()
+    watcher, profile, _ = watcher_for(settings, client)
+    make_scan(profile.inbox / "duplex.pdf", True, False)
+
+    watcher.poll_once()
+
+    assert client.page_counts == [2]
+
+
+def test_a_scan_of_only_blank_pages_fails_before_mistral_is_asked(paperless_settings, monkeypatch):
+    monkeypatch.setenv("PAPERLESS_TEXT_SOURCE", "mistral")
+    settings = replace(Settings.from_env(), blank_max_ink=0.002)
+    client = FakePaperless()
+    watcher, profile, backend = watcher_for(settings, client, ["invented", "text"])
+    make_scan(profile.inbox / "empty.pdf", False, False)
+
+    watcher.poll_once()
+
+    assert not client.uploads and not backend.jobs and backend.ocr_calls == 0
+    assert "every page of the scan is blank" in (profile.failed / "empty.pdf.error.txt").read_text(encoding="utf-8")
+
+
+def test_mistral_text_of_blank_pages_stays_out_of_the_content(paperless_settings, monkeypatch):
+    monkeypatch.setenv("PAPERLESS_TEXT_SOURCE", "mistral")
+    settings = replace(Settings.from_env(), blank_max_ink=0.002)
+    client = FakePaperless()
+
+    class ImageBackend(FakeBackend):
+        # The scan's pages carry no /TestIndex: Mistral answers per page in order.
+        def _ocr(self, pdf_bytes):
+            return [
+                {"index": i, "markdown": text, "header": "", "footer": "", "images": []}
+                for i, text in enumerate(self.texts)
+            ]
+
+    watcher, profile, _ = watcher_for(settings, client)
+    watcher.backend = ImageBackend(["Front", "Invented on empty paper", "Back"])
+    make_scan(profile.inbox / "duplex.pdf", True, False, True)
+
+    watcher.poll_once()
+
+    assert client.page_counts == [2]
+    assert client.contents == [(42, "Front\n\nBack")]
 
 
 def test_paperless_content_layout():
