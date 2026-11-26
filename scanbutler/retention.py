@@ -54,20 +54,25 @@ def _last_change(work: Path) -> float:
 
 
 def _size(work: Path) -> int:
-    return sum(p.stat().st_size for p in work.rglob("*") if p.is_file())
+    return sum(p.lstat().st_size for p in work.rglob("*") if p.is_file() and not p.is_symlink())
 
 
 def _changed_since(path: Path, cutoff: float) -> bool:
-    """True if the folder or file, or anything inside, changed after `cutoff`."""
-    return any(p.stat().st_mtime > cutoff for p in (path, *path.rglob("*")))
+    """True if the folder or file, or anything inside, changed after `cutoff`.
+
+    A link counts by itself, not by what it points to: an interrupted
+    ocrmypdf leaves a link to an input that is long gone.
+    """
+    inside = () if path.is_symlink() else path.rglob("*")
+    return any(p.lstat().st_mtime > cutoff for p in (path, *inside))
 
 
 def _remove(work: Path, root: Path) -> int:
-    if work.is_dir():
+    if work.is_dir() and not work.is_symlink():
         size = _size(work)
         shutil.rmtree(work)
     else:
-        size = work.stat().st_size
+        size = work.lstat().st_size
         work.unlink()
     # Sub-folders mirror the inbox; drop the ones left empty.
     parent = work.parent

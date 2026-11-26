@@ -127,3 +127,38 @@ def test_old_temp_leftovers_go_recent_ones_stay(settings):
 
     assert not stale.exists() and not (tmp / "old-file.tmp").exists()
     assert fresh.exists()
+
+
+def test_leftovers_with_a_link_to_a_vanished_input_go_too(settings, caplog):
+    # An interrupted ocrmypdf leaves "origin", a link to its input. Once the
+    # input is gone the link points nowhere, and asking for its target's age fails.
+    tmp = settings.work_dir / "tmp"
+    stale = tmp / "ocrmypdf.io.abc"
+    stale.mkdir(parents=True)
+    (stale / "origin").symlink_to(tmp / "gone.pdf")
+    (tmp / "loose-link").symlink_to(tmp / "gone-too.pdf")
+    long_ago = time.time() - 5 * DAY
+    for path in (stale / "origin", tmp / "loose-link", stale):
+        os.utime(path, (long_ago, long_ago), follow_symlinks=False)
+
+    retention.clean(settings)
+
+    assert not stale.exists() and not (tmp / "loose-link").is_symlink()
+    assert "temp file not removed" not in caplog.text
+
+
+def test_a_link_in_the_temp_folder_is_removed_not_followed(settings, tmp_path):
+    tmp = settings.work_dir / "tmp"
+    tmp.mkdir(parents=True)
+    kept = tmp_path / "elsewhere"
+    kept.mkdir()
+    (kept / "scan.pdf").write_bytes(b"x" * 100)
+    (tmp / "link").symlink_to(kept, target_is_directory=True)
+    long_ago = time.time() - 5 * DAY
+    os.utime(tmp / "link", (long_ago, long_ago), follow_symlinks=False)
+
+    retention.clean(settings)
+
+    assert not (tmp / "link").is_symlink()
+    assert (kept / "scan.pdf").exists()
+

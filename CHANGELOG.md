@@ -5,6 +5,15 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Fixed
+- Leftovers of an interrupted OCR run in the temporary folder were never
+  cleaned up when they held a link to an input file that no longer exists,
+  and every cleanup logged `temp file not removed`. Cleanup now looks at a
+  link itself, not at what it points to, and never follows one out of the
+  temporary folder.
+
 ## [1.10.0] - 2026-11-26
 
 ### Fixed
@@ -795,6 +804,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[Unreleased]: https://github.com/Tom-Joad/scanbutler/compare/v1.10.0...HEAD
 [1.10.0]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.8...v1.10.0
 [1.9.8]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.7...v1.9.8
 [1.9.7]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.6...v1.9.7
