@@ -384,7 +384,7 @@ system (s6-overlay) has to start as root and as process 1. Docker mods
 |---|---|---|
 | `BOUNDARY_WINDOW` / `BOUNDARY_STEP` | `12` / `6` | Pages per model request, and how far each window moves on |
 | `REVIEW_CONFIDENCE` | `0.75` | Below this model confidence, a document is flagged |
-| `DROP_BLANK_PAGES` | `true` | `false` keeps blank pages with the document before them |
+| `DROP_BLANK_PAGES` | `true` | `false` keeps blank pages with the document before them, and in Paperless uploads |
 | `BLANK_MAX_INK_PERCENT` | `0.2` | Pages with less visible ink than this are blank |
 | `BLANK_MAX_CHARS` | `15` | Pages with no image and at most this much text are blank |
 | `METADATA_MAX_CHARS` | `24000` | Text per document sent for naming; longer documents are shortened in the middle |
@@ -618,9 +618,13 @@ and tag itself, for example with an AI tagger such as
 1. ocrmypdf adds the Tesseract text layer, with the same settings as for the
    other inputs. By default, no paid service is involved; see
    [Content from Mistral OCR](#content-from-mistral-ocr) for the option.
-2. The PDF is uploaded through `POST /api/documents/post_document/`, keeping
+2. Blank pages are left out of the upload (`DROP_BLANK_PAGES`), recognised
+   by the ink on the page, as for the other inputs. The original in
+   `archive/` keeps every page. A file with nothing but blank pages is not
+   uploaded; it moves to `failed/`.
+3. The PDF is uploaded through `POST /api/documents/post_document/`, keeping
    its file name and adding `PAPERLESS_TAGS`, if set.
-3. The container follows Paperless's consumption task until a document has
+4. The container follows Paperless's consumption task until a document has
    been created. Only then does the original move to `archive/`, and the work
    copy is deleted.
 

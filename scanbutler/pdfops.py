@@ -493,20 +493,24 @@ def run_group(cmd: list[str], timeout: float, env: dict[str, str] | None = None)
         return subprocess.CompletedProcess(cmd, process.returncode, out, err)
 
 
-def write_document(src: Path, page_indices: list[int], dst: Path, title: str, subject: str) -> None:
-    """Copy the given 0-based pages of `src` into a new PDF at `dst`."""
+def write_document(src: Path, page_indices: list[int], dst: Path, title: str = "", subject: str = "") -> None:
+    """Copy the given 0-based pages of `src` into a new PDF at `dst`.
+
+    Without a title, the new PDF carries no title or subject at all.
+    """
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_name(dst.name + ".tmp")
     with pikepdf.open(src) as pdf:
         out = pikepdf.new()
         for index in page_indices:
             out.pages.append(pdf.pages[index])
-        with out.open_metadata(set_pikepdf_as_editor=False) as meta:
-            meta["dc:title"] = title
+        if title:
+            with out.open_metadata(set_pikepdf_as_editor=False) as meta:
+                meta["dc:title"] = title
+                if subject:
+                    meta["dc:description"] = subject
+            out.docinfo["/Title"] = title
             if subject:
-                meta["dc:description"] = subject
-        out.docinfo["/Title"] = title
-        if subject:
-            out.docinfo["/Subject"] = subject
+                out.docinfo["/Subject"] = subject
         out.save(tmp)
     tmp.replace(dst)

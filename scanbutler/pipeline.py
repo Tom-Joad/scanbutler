@@ -36,6 +36,7 @@ INK = "ink.json"
 DECISIONS = "decisions.json"
 LLM_CACHE = "llm"
 _IMAGE_REF = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+TRIMMED = "upload.pdf"
 UPLOAD = "paperless_task.json"
 # sha256 of every original handed to Paperless -> document id and date.
 LEDGER = "uploaded.json"
@@ -383,12 +384,7 @@ def _process_stack(
     if pdfops.page_count(searchable) != len(pages):
         raise RuntimeError("searchable PDF and OCR result disagree on the page count")
 
-    ink = _read_ink(work / INK)
-    if ink is None:
-        ink = pdfops.ink_coverage(src)
-        write_json(work / INK, ink)
-    if len(ink) != len(pages):
-        raise RuntimeError("ink measurement and OCR result disagree on the page count")
+    ink = _ink(src, work, len(pages))
     pages = [replace(page, ink=value) for page, value in zip(pages, ink)]
 
     plan_path = work / PLAN
@@ -512,6 +508,17 @@ class AlreadyInProgress(Exception):
     """An identical file is being worked on; this one waits for the next round."""
 
 
+def _ink(src: Path, work: Path, page_count: int) -> list[float]:
+    """Ink coverage of every page of `src`, measured once and kept in the work directory."""
+    ink = _read_ink(work / INK)
+    if ink is None:
+        ink = pdfops.ink_coverage(src)
+        write_json(work / INK, ink)
+    if len(ink) != page_count:
+        raise RuntimeError("ink measurement and OCR result disagree on the page count")
+    return ink
+
+
 def _read_ink(path: Path) -> list[float] | None:
     """The saved ink measurement, or None if there is none or it can't be read: it is cheap to redo."""
     try:
@@ -545,19 +552,35 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
         else:
             shutil.copyfile(src, searchable)
 
+    # Blank pages go by their ink alone, as for scanner files: Tesseract's
+    # text can't tell a photo from an empty page, and Mistral invents text
+    # on empty ones. Checked before Mistral is paid for a scan of nothing.
+    blank: set[int] = set()
+    upload = searchable
+    if settings.drop_blank_pages:
+        ink = _ink(src, work, pdfops.page_count(searchable))
+        blank = {index for index, value in enumerate(ink) if value < settings.blank_max_ink}
+        if blank and len(blank) == len(ink):
+            raise RuntimeError("every page of the scan is blank")
+        log.info("blank pages detected", extra={"blank": len(blank), "content": len(ink) - len(blank)})
+        if blank:
+            upload = work / TRIMMED
+            pdfops.write_document(searchable, [i for i in range(len(ink)) if i not in blank], upload)
+
     content = None
     if profile.text_source == "mistral":
         # Fetched before the upload, so the content can be replaced within
         # seconds of the document appearing: before a tagger watching
         # Paperless is likely to read it.
-        content = paperless_content(read_text(src, work, settings, backend, "mistral"))
+        pages = read_text(src, work, settings, backend, "mistral")
+        content = paperless_content([page for page in pages if page.index not in blank])
 
     state = work / UPLOAD
     if state.exists():
         task_id = json.loads(state.read_text(encoding="utf-8"))["task_id"]
         log.info("paperless upload resumed", extra={"source": source, "task": task_id})
     else:
-        task_id = client.upload(searchable, src.name, list(profile.paperless.tags))
+        task_id = client.upload(upload, src.name, list(profile.paperless.tags))
         write_json(state, {"task_id": task_id})
         log.info("paperless uploaded", extra={"source": source, "task": task_id})
 
