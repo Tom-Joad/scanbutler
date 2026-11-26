@@ -30,7 +30,7 @@ cryptography==50.0.2
     # via pdfminer-six
 fastapi==0.165.0
     # via direct dependency
-fonttools==4.68.0
+fonttools==4.69.1
     # via
     #   fpdf2
     #   pikepdf
@@ -64,7 +64,7 @@ ocrmypdf==17.14.2
     # via direct dependency
 opentelemetry-api==1.45.2
     # via fastapi
-packaging==26.3
+packaging==26.4
     # via
     #   ocrmypdf
     #   pikepdf

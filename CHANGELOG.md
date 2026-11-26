@@ -5,6 +5,13 @@ All notable changes to this project are listed here. Versions follow
 needs action when upgrading (a renamed or removed setting, a different folder
 layout, a changed webhook payload) only comes with a new major version.
 
+## [Unreleased]
+
+### Changed
+- Updated dependencies:
+  - fonttools from 4.68.0 to 4.69.1
+  - packaging from 26.3 to 26.4
+
 ## [1.9.8] - 2026-11-25
 
 ### Security
@@ -763,6 +770,7 @@ First public release.
 - Review files and hand-editable split plans with `stacksplit rebuild`.
 - Request throttling and an Unraid template.
 
+[Unreleased]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.8...HEAD
 [1.9.8]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.7...v1.9.8
 [1.9.7]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.6...v1.9.7
 [1.9.6]: https://github.com/Tom-Joad/scanbutler/compare/v1.9.5...v1.9.6
