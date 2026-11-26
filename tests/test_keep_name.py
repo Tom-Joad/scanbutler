@@ -85,6 +85,9 @@ def test_naming_on_by_default(env):
     assert settings.profile("stacks").naming
 
 
+TEXT = pdfops.Ink(pale=0.05, marks=40)
+
+
 def _scanner(settings, **changes):
     return replace(settings.profile("scanner"), naming=False, text_source="tesseract", **changes)
 
@@ -93,7 +96,7 @@ def test_output_keeps_the_scanner_file_name(settings, tmp_path, monkeypatch):
     scanner = _scanner(settings)
     src = tmp_path / "03102026104645.pdf"
     make_text_pdf(src, ["page one", "page two"])
-    monkeypatch.setattr(pdfops, "ink_coverage", lambda path: [0.05, 0.05])
+    monkeypatch.setattr(pdfops, "measure_ink", lambda path: [TEXT, TEXT])
     backend = FakeBackend([])
 
     work = process_stack(src, PurePosixPath("Office/2026"), settings, backend, scanner)
@@ -107,7 +110,7 @@ def test_output_keeps_the_scanner_file_name(settings, tmp_path, monkeypatch):
     src2 = tmp_path / "other" / "03102026104645.pdf"
     src2.parent.mkdir()
     make_text_pdf(src2, ["another scan"])
-    monkeypatch.setattr(pdfops, "ink_coverage", lambda path: [0.05])
+    monkeypatch.setattr(pdfops, "measure_ink", lambda path: [TEXT])
     process_stack(src2, PurePosixPath("Office/2026"), settings, backend, scanner)
     assert sorted(p.name for p in out.glob("*.pdf")) == ["03102026104645 (2).pdf", "03102026104645.pdf"]
 
@@ -117,7 +120,7 @@ def test_blank_pages_are_still_dropped(settings, tmp_path, monkeypatch):
     scanner = _scanner(settings)
     src = tmp_path / "scan.pdf"
     make_text_pdf(src, ["front", "", "back"])
-    monkeypatch.setattr(pdfops, "ink_coverage", lambda path: [0.05, 0.0001, 0.04])
+    monkeypatch.setattr(pdfops, "measure_ink", lambda path: [TEXT, pdfops.Ink(pale=0.0001, marks=0), TEXT])
 
     work = process_stack(src, PurePosixPath(""), settings, FakeBackend([]), scanner)
 
@@ -130,7 +133,7 @@ def test_rebuild_keeps_the_name_and_refuses_retitling(settings, tmp_path, monkey
     scanner = _scanner(settings)
     src = tmp_path / "scan.pdf"
     make_text_pdf(src, ["front"])
-    monkeypatch.setattr(pdfops, "ink_coverage", lambda path: [0.05])
+    monkeypatch.setattr(pdfops, "measure_ink", lambda path: [TEXT])
     work = process_stack(src, PurePosixPath(""), settings, FakeBackend([]), scanner)
 
     assert [p.name for p in rebuild(work, settings, None)] == ["scan.pdf"]
@@ -146,7 +149,7 @@ def test_a_hand_edited_kept_name_stays_in_the_output_folder(settings, tmp_path, 
     scanner = _scanner(settings)
     src = tmp_path / "scan.pdf"
     make_text_pdf(src, ["front"])
-    monkeypatch.setattr(pdfops, "ink_coverage", lambda path: [0.05])
+    monkeypatch.setattr(pdfops, "measure_ink", lambda path: [TEXT])
     work = process_stack(src, PurePosixPath(""), settings, FakeBackend([]), scanner)
 
     plan = json.loads((work / PLAN).read_text(encoding="utf-8"))

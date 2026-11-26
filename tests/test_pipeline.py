@@ -148,13 +148,14 @@ def test_a_leading_blank_page_does_not_hide_the_review_checks(settings, tmp_path
     from dataclasses import replace
 
     from scanbutler.ocr import Page
+    from scanbutler.pdfops import Ink
     from scanbutler.pipeline import build_plan
 
     settings = replace(settings, drop_blank_pages=False)
     pages = [
-        Page(0, "", "", "", False, ink=0.0),  # a blank page before the first content page
-        Page(1, "LETTER Befund\nThorax", "", "Seite 2 von 3", False, ink=0.05),
-        Page(2, "Beurteilung unauffaellig", "", "Seite 3 von 3", False, ink=0.05),
+        Page(0, "", "", "", False, ink=Ink(0.0, 0)),  # a blank page before the first content page
+        Page(1, "LETTER Befund\nThorax", "", "Seite 2 von 3", False, ink=Ink(0.05, 40)),
+        Page(2, "Beurteilung unauffaellig", "", "Seite 3 von 3", False, ink=Ink(0.05, 40)),
     ]
 
     plan = build_plan(pages, settings, FakeBackend([]), "s.pdf", "abc", PurePosixPath(""))

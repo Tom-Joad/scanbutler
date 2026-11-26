@@ -80,8 +80,9 @@ token that has the `read:packages` scope.
   get the text layer and are uploaded to Paperless-ngx. Paperless, or an AI tagger
   such as [Zettelrobbe](https://github.com/admonstrator/zettelrobbe), does the
   naming and tagging.
-- Blank pages are left out of the upload; the original in `paperless/archive/`
-  keeps them.
+- Clearly empty pages are left out of the upload; the original in
+  `paperless/archive/` keeps them. `DROP_BLANK_PAGES=false` (advanced view)
+  switches that off.
 - `PAPERLESS_URL` must be reachable from inside the container. For a
   Paperless container on the same server, that is usually
   `http://<server-ip>:8000`. `localhost` does not work, because it would

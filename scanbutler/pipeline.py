@@ -14,7 +14,7 @@ import re
 import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 
@@ -24,6 +24,7 @@ from .fileio import write_json
 from .naming import build_stem, sanitize, unique_path
 from .llm_cache import CachedChat
 from .ocr import BatchOptions, Page, run_ocr
+from .pdfops import Ink
 from .paperless import DuplicateFile, PaperlessError, PaperlessUnavailable, duplicate_of, task_document_id, task_message, task_status
 from .plan import Plan, PlannedDocument, format_pages, parse_pages
 
@@ -384,7 +385,9 @@ def _process_stack(
     if pdfops.page_count(searchable) != len(pages):
         raise RuntimeError("searchable PDF and OCR result disagree on the page count")
 
-    ink = _ink(src, work, len(pages))
+    ink = _ink(src, searchable, work)
+    if len(ink) != len(pages):
+        raise RuntimeError("ink measurement and OCR result disagree on the page count")
     pages = [replace(page, ink=value) for page, value in zip(pages, ink)]
 
     plan_path = work / PLAN
@@ -508,22 +511,33 @@ class AlreadyInProgress(Exception):
     """An identical file is being worked on; this one waits for the next round."""
 
 
-def _ink(src: Path, work: Path, page_count: int) -> list[float]:
-    """Ink coverage of every page of `src`, measured once and kept in the work directory."""
+def _ink(src: Path, searchable: Path, work: Path) -> list[Ink]:
+    """What every page shows of content, measured once and kept in the work directory.
+
+    The ink is measured on the scan itself. The words come from the text
+    layer, Tesseract's for a scan: unlike a language model it doesn't invent
+    sentences on empty paper, and it reads small print the ink measurement
+    takes for dust.
+    """
     ink = _read_ink(work / INK)
     if ink is None:
-        ink = pdfops.ink_coverage(src)
-        write_json(work / INK, ink)
-    if len(ink) != page_count:
-        raise RuntimeError("ink measurement and PDF disagree on the page count")
+        texts = pdfops.page_texts(searchable)
+        measured = pdfops.measure_ink(src)
+        if len(measured) != len(texts):
+            raise RuntimeError("scan and searchable PDF disagree on the page count")
+        ink = [replace(page, words=pdfops.count_words(text)) for page, text in zip(measured, texts)]
+        write_json(work / INK, [asdict(page) for page in ink])
     return ink
 
 
-def _read_ink(path: Path) -> list[float] | None:
-    """The saved ink measurement, or None if there is none or it can't be read: it is cheap to redo."""
+def _read_ink(path: Path) -> list[Ink] | None:
+    """The saved ink measurement, or None if there is none or it can't be read: it is cheap to redo.
+
+    A file from before 1.10.0 holds one number per page; it is measured again.
+    """
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        return [Ink(**page) for page in json.loads(path.read_text(encoding="utf-8"))]
+    except (OSError, ValueError, TypeError):
         return None
 
 
@@ -552,13 +566,13 @@ def _upload(src, folder, settings, client, profile, backend, digest: str, ledger
         else:
             shutil.copyfile(src, searchable)
 
-    # Blank pages go by their ink alone, as for scanner files: Tesseract's
-    # text can't tell a photo from an empty page, and Mistral invents text
-    # on empty ones. Checked before Mistral is paid for a scan of nothing.
+    # Blank pages go by their ink alone: there is no text rule to fall back
+    # on, so BLANK_MAX_INK_PERCENT=0 leaves every page in. Checked before
+    # Mistral is paid for a scan of nothing.
     blank: set[int] = set()
-    if settings.drop_blank_pages:
-        ink = _ink(src, work, pdfops.page_count(searchable))
-        blank = {index for index, value in enumerate(ink) if value < settings.blank_max_ink}
+    if settings.drop_blank_pages and settings.blank_max_ink > 0:
+        ink = _ink(src, searchable, work)
+        blank = {index for index, page in enumerate(ink) if page.empty(settings.blank_max_ink)}
         if blank and len(blank) == len(ink):
             raise RuntimeError("every page of the scan is blank")
         # No review file here: the log is where the left-out pages are named.

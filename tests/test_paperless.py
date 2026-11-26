@@ -306,6 +306,17 @@ def test_blank_pages_stay_with_drop_blank_pages_off(paperless_settings):
     assert client.page_counts == [2]
 
 
+def test_without_the_ink_check_every_page_is_uploaded(paperless_settings):
+    # BLANK_MAX_INK_PERCENT=0, as in the settings fixture: nothing else may decide here.
+    client = FakePaperless()
+    watcher, profile, _ = watcher_for(paperless_settings, client)
+    make_scan(profile.inbox / "duplex.pdf", True, False)
+
+    watcher.poll_once()
+
+    assert client.page_counts == [2]
+
+
 def test_a_scan_of_only_blank_pages_fails_before_mistral_is_asked(paperless_settings, monkeypatch):
     monkeypatch.setenv("PAPERLESS_TEXT_SOURCE", "mistral")
     settings = replace(Settings.from_env(), blank_max_ink=0.002)
