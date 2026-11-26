@@ -493,6 +493,16 @@ def run_group(cmd: list[str], timeout: float, env: dict[str, str] | None = None)
         return subprocess.CompletedProcess(cmd, process.returncode, out, err)
 
 
+def drop_pages(src: Path, page_indices: set[int], dst: Path) -> None:
+    """`src` without the given 0-based pages, at `dst`; everything else about the file stays."""
+    tmp = dst.with_name(dst.name + ".tmp")
+    with pikepdf.open(src) as pdf:
+        for index in sorted(page_indices, reverse=True):
+            del pdf.pages[index]
+        pdf.save(tmp)
+    tmp.replace(dst)
+
+
 def write_document(src: Path, page_indices: list[int], dst: Path, title: str, subject: str) -> None:
     """Copy the given 0-based pages of `src` into a new PDF at `dst`."""
     dst.parent.mkdir(parents=True, exist_ok=True)
