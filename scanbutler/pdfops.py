@@ -94,7 +94,7 @@ def _paper(histogram: list[int]) -> int:
     return 255
 
 
-def _ink(image) -> Ink:
+def _measure(image) -> Ink:
     width, height = image.size
     # Area: a 5% margin is ignored (scanner edges), and a median filter at
     # half size removes dust and thin fold lines.
@@ -105,8 +105,12 @@ def _ink(image) -> Ink:
     # thin for the filter above, so this looks at full size with a 2% margin.
     fine = image.crop((width // 50, height // 50, width - width // 50, height - height // 50))
     threshold = _paper(fine.histogram()) - MARK_CONTRAST
-    cells = fine.point(lambda value: 255 if value < threshold else 0).reduce(MARK_CELL).histogram()
-    return Ink(pale=pale, marks=sum(cells[round(255 * MARK_SHARE) :]))
+    dark = fine.point(lambda value: 255 if value < threshold else 0)
+    # Counted on two grids, half a cell apart: a digit that straddles the
+    # cells of one grid sits inside a cell of the other.
+    shifted = dark.crop((MARK_CELL // 2, MARK_CELL // 2, *dark.size))
+    marks = max(sum(grid.reduce(MARK_CELL).histogram()[round(255 * MARK_SHARE) :]) for grid in (dark, shifted))
+    return Ink(pale=pale, marks=marks)
 
 
 def measure_ink(path: Path) -> list[Ink]:
@@ -122,7 +126,7 @@ def measure_ink(path: Path) -> list[Ink]:
         try:
             for page in doc:
                 # Measured page by page: the images of a big stack would not fit in memory.
-                result.append(_ink(page.render(scale=INK_DPI / 72, grayscale=True).to_pil().convert("L")))
+                result.append(_measure(page.render(scale=INK_DPI / 72, grayscale=True).to_pil().convert("L")))
         finally:
             doc.close()
     return result

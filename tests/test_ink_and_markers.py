@@ -86,6 +86,14 @@ def test_a_lone_page_number_is_content(tmp_path):
     assert blank.empty(0.001)
 
 
+def test_a_page_number_is_seen_wherever_it_sits():
+    # The marks are counted in cells; no position may fall between them.
+    for dx in range(0, 16, 3):
+        for dy in range(0, 16, 3):
+            ink = pdfops._measure(_small_print(_paper(), (400 + dx, 1000 + dy)))
+            assert ink.marks, (dx, dy)
+
+
 def test_dust_and_fold_lines_leave_a_page_empty(tmp_path):
     page = _paper()
     draw = ImageDraw.Draw(page)

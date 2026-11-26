@@ -533,7 +533,7 @@ def _ink(src: Path, searchable: Path, work: Path) -> list[Ink]:
 def _read_ink(path: Path) -> list[Ink] | None:
     """The saved ink measurement, or None if there is none or it can't be read: it is cheap to redo.
 
-    A file from before 1.10.0 holds one number per page; it is measured again.
+    A file of an older version holds one number per page; it is measured again.
     """
     try:
         return [Ink(**page) for page in json.loads(path.read_text(encoding="utf-8"))]

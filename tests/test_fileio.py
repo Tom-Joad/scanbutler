@@ -39,7 +39,7 @@ def test_an_unreadable_ink_file_is_measured_again(tmp_path):
     assert _read_ink(path) is None
     path.write_text("[0.1, 0.", encoding="utf-8")  # cut off
     assert _read_ink(path) is None
-    path.write_text("[0.1, 0.2]", encoding="utf-8")  # written before 1.10.0: one number per page
+    path.write_text("[0.1, 0.2]", encoding="utf-8")  # an older version's: one number per page
     assert _read_ink(path) is None
     path.write_text('[{"pale": 0.1, "marks": 3, "words": 7}]', encoding="utf-8")
     assert _read_ink(path) == [Ink(pale=0.1, marks=3, words=7)]
