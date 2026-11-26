@@ -7,15 +7,6 @@ layout, a changed webhook payload) only comes with a new major version.
 
 ## [Unreleased]
 
-### Fixed
-- The Paperless inputs uploaded blank pages, such as the empty backs of a
-  duplex scan. They are now left out of the upload, as the other inputs
-  already did, following `DROP_BLANK_PAGES` and `BLANK_MAX_INK_PERCENT`.
-  The original in `archive/` keeps every page. With
-  `PAPERLESS_TEXT_SOURCE=mistral`, text that Mistral OCR invents on an empty
-  page no longer reaches the document's content. A file with nothing but
-  blank pages now moves to `failed/` instead of becoming an empty document.
-
 ### Changed
 - Updated dependencies:
   - fonttools from 4.68.0 to 4.69.1
